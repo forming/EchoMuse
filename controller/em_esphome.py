@@ -1183,6 +1183,24 @@ class EchoMuseSatellite(SatelliteServerProtocol):
             cb = self._owning_server._standalone_play
         return cb
 
+    async def _await_announce_play_cb(self):
+        """
+        The same live read, given a moment to turn up (#219).
+
+        `_announce_play_cb` answers "is the device connected right now", and the
+        Dot's own `/control` connect is not ordered against HA's ESPHome TCP
+        connect — so reading it once, at task start, could read None for a
+        device that was connecting and would be ready in milliseconds. That is
+        what answered `VoiceAssistantAnnounceFinished(success=False)` for audio
+        we simply were not ready to play yet, which costs the user a Retry in
+        the satellite setup dialog.
+
+        The wait and its number live in em_announce, which the test suite can
+        import; this is the adapter that supplies the thing being waited on.
+        """
+        return await em_announce.wait_for_play_cb(
+            self._announce_play_cb, log_name=self._log_name)
+
     async def _play_media_announce(self, media_id: str) -> None:
         """
         play_media with announce=true — an ordinary media_player command.
@@ -1195,7 +1213,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
             await em_announce.play_media(
                 media_id,
                 fetch=_fetch_tts_audio,
-                play=self._announce_play_cb(),
+                play=self._await_announce_play_cb(),
                 log_name=self._log_name,
             )
         except Exception as e:
@@ -1231,6 +1249,14 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         run yet for this session. Confirmed in practice: this fired as
         "no playback callback set" on freshly-established connections, not
         just stale reconnects, which ruled out a staleness-only explanation.
+
+        A live read at task start was still not enough (#219). "Late" and "late
+        enough" are different things: the announce arrived, was fetched, and
+        found the callback still unset because the Dot's connect was mid-flight,
+        so we reported success=False for audio that only needed a moment. The
+        read is now `_await_announce_play_cb`, which waits on the live value
+        instead of sampling it once — the same reasoning extended from "read it
+        late" to "read it late, and give it a moment".
         """
         def reply(ok: bool) -> None:
             if not self._transport or self._transport.is_closing():
@@ -1246,7 +1272,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         await em_announce.run(
             media_id,
             fetch=_fetch_tts_audio,
-            play=self._announce_play_cb(),
+            play=self._await_announce_play_cb(),
             on_finished=reply,
             log_name=self._log_name,
             preannounce_media_id=preannounce_media_id,

@@ -109,6 +109,7 @@ import em_oww_models
 import em_player
 import em_volume
 import em_timers
+import em_loglevel
 
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s — %(message)s"
 
@@ -142,6 +143,21 @@ logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
 # Respect DEBUG rather than silencing unconditionally, same as the rest of
 # this module's log level.
 logging.getLogger("aiohttp.access").setLevel(logging.INFO if DEBUG else logging.WARNING)
+
+# LOG_LEVELS="echomuse.esphome=DEBUG,aiohttp.access=INFO" — per-logger
+# overrides on top of the global level, applied after the two defaults above
+# so a specific setting can supersede them. `.get(..., "")` rather than a
+# truthiness test for the reason DEBUG needed one: every non-empty string is
+# truthy in Python, and em_start.py writes a false add-on option as exactly
+# the string "0". A bad pair warns and is skipped (em_loglevel), never fatal
+# — a typo in a diagnostics setting must not refuse to boot a controller.
+_overrides = em_loglevel.apply(os.environ.get("LOG_LEVELS", ""))
+for _problem in _overrides.problems:
+    log.warning("LOG_LEVELS: %s", _problem)
+if _overrides.levels:
+    log.info("Log levels: " + ", ".join(
+        f"{name}={logging.getLevelName(level)}"
+        for name, level in _overrides.levels.items()))
 
 
 def _log_task_exception(task: asyncio.Task) -> None:

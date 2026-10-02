@@ -53,7 +53,12 @@ import em_eq
 import em_limiter
 import em_mbc
 
-log = logging.getLogger("player")
+log = logging.getLogger("echomuse.player")
+# Under `echomuse.` on purpose (#378). It was the bare name "player", which
+# is outside the hierarchy, so `echomuse=DEBUG` and any per-logger override
+# could never reach the loudest logger in the tree. It behaved correctly
+# only by accident: with DEBUG unset the root level is INFO and a logger
+# with no level of its own inherits that.
 
 SPEAKER_RATE  = 48000
 SPEAKER_BYTES = 4096                     # bytes per 0x02 period (mono S16)

@@ -2083,6 +2083,18 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
               <CircleButton onClick={onClose} title="Close">×</CircleButton>
             </div>
           </div>
+          {/* What deleting leaves behind in Home Assistant (#375). Full width
+              and under the header row, not beside Confirm: a sentence that
+              fits next to a button is not read, and the port it names is the
+              whole value of it. Same amber notice surface as the controller
+              update banner — `em-on-dark` for the dark-theme text tokens it
+              implies, `--notice-bg` for the panel. */}
+          {isAdmin && confirmDelete && (
+            <div className="em-on-dark" style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12, padding: '10px 14px', background: 'var(--notice-bg)', border: '1px solid var(--notice-line)', borderRadius: 8, fontFamily: "'DM Sans',sans-serif", fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
+              <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--warn)', fontWeight: 600, flexShrink: 0 }}>Home Assistant</span>
+              <span>{_deleteHaWarning(device)}</span>
+            </div>
+          )}
           {device.approved ? (
             <div className="em-tabs" style={{ display: 'flex', gap: 2 }}>
               {TABS.map(t => (
@@ -3325,6 +3337,38 @@ function _kernelLabel(d) {
 function _kernelTitle(d) {
   return d.kernelArch ? `kernel ${d.kernelArch} ${d.kernelRelease || ''}`.trim() : null;
 }
+
+// What deleting a device leaves behind in Home Assistant, in the operator's
+// terms (#375). Two correct decisions meet here.
+//
+// A device's ESPHome identity is DERIVED from its serial — the stored MAC is
+// md5(device_id), the mDNS service name is `echomuse-<last 12 of the serial>` —
+// so a device deleted and re-approved advertises the same name and the same MAC
+// as before. Its port is not derived: `assign_esphome_port` only moves the
+// counter forwards, and a deleted device's satellite is dropped so a re-added
+// one is allocated fresh, because deleting is often how a device is moved off
+// a colliding port. HA then holds a config entry with the name and MAC it
+// already had, pointing at a port nobody listens on; discovery sees a service
+// it already has an entry for and offers nothing new, and the entry keeps
+// dialling the dead port. Reproduced on 2.22.0-ea.4, 2026-08-28, and the only
+// way out — deleting the entry by hand — is nowhere written down.
+//
+// Naming the port is the whole point: it is what the stale entry is keyed on
+// and what the operator has to go and match. "Home Assistant may be confused"
+// is the kind of warning people learn to dismiss.
+//
+// A NULL port is a device that never had a satellite, so there is no number to
+// name — but the rest is still true, and the sentence still has to say it.
+// `!= null` rather than a truthiness test, so a 0 is reported as 0 instead of
+// swallowed: absence stores as NULL, never 0, so conflating them here would
+// repeat the mistake.
+const _deleteHaWarning = (d) => {
+  const who  = (d && (d.label || d.device_id)) || 'this device';
+  const port = d && d.esphome_port != null ? ` on port ${d.esphome_port}` : '';
+  return `Home Assistant keys its entries on the port, so deleting this record `
+       + `leaves its entry for ${who}${port} behind. Delete that entry in Home `
+       + `Assistant before adding ${who} back — it is not offered a second time.`;
+};
 
 const _INIT_RC_APPEND = `
 service mixer /system/bin/sh
@@ -8832,6 +8876,18 @@ function ProvisionWizard({ token, onClose, knownDevices }) {
               <div className="em-panel em-wizard-recovery">
                 <div className="em-label">This step failed</div>
                 <p className="em-wizard-recovery__hint">{recoveryHint()}</p>
+                {/* The same warning the Detail modal's delete gives (#375).
+                    The matched device is resolved out of knownDevices rather
+                    than carried across, so the port is named here too — only
+                    its id survives on the error. */}
+                {step === 0 && duplicateDeviceId && (() => {
+                  const dup = (knownDevices || []).find(d => d && d.device_id === duplicateDeviceId);
+                  return (
+                    <p className="em-wizard-recovery__hint" style={{ color: 'var(--warn)' }}>
+                      {_deleteHaWarning(dup || { device_id: duplicateDeviceId })}
+                    </p>
+                  );
+                })()}
                 <div className="em-wizard-recovery__actions">
                   <Pill accent onClick={() => runStep(step)}>Retry</Pill>
                    {!CONNECT.has(step) && (

@@ -101,11 +101,42 @@ func (vc *volumeController) SetApply(fn func(int)) {
 	}
 }
 
-// Set applies a new volume level (0–volumeMax). showRing
-// paints the cyan volume arc for the 2s display window — physical button
-// presses pass true; remote sets (controller command / HA) and the boot-time
-// SeedVolume pass false so the ring doesn't light when nobody is at the
-// device.
+// Set applies a new volume level (0–volumeMax). showRing paints the cyan
+// volume arc for the 2s display window.
+//
+// showRing means "somebody changed this on purpose", and the arc is the
+// feedback for EVERY such change, not only the physical presses. #634
+// reported a volume changed from Home Assistant applying correctly while the
+// ring stayed dark, so getting quieter was the only confirmation the request
+// had landed. EchoMuse already keeps device, controller and HA in step on
+// volume; the arc makes that synchronisation visible instead of inferred.
+//
+// Where this sits in the ring's priority order is unchanged by where the
+// change came from, and that is the point: the arc already outranks turn
+// ANIMATIONS (they repaint ~every 100ms and would leave it legible for one
+// frame), and already yields to a deliberate action-button press, which drops
+// the hold via CancelDisplay. What the arc never outranks is the link pulse —
+// but neither route can reach it here. The volume buttons go inert while
+// linkDown, and a remote set needs a live control connection, so a volume
+// change cannot arrive with no controller above it; and the mute ring is
+// restored over the arc on expiry regardless. Painting from a remote change
+// therefore adds no new owner to the ring, and no new collision.
+//
+// SeedVolume, the boot-time restore of a stored level, passes false and must
+// keep doing so. Nobody asked for that change, and painting it would light the
+// ring on every boot for a level the user set days ago.
+//
+// Level 0 paints nothing, from either route. showLEDs draws an EMPTY arc
+// there — its one-LED floor applies only above volumeMin — so painting it
+// would leave the ring dark for the whole 2s while suppressPaint held back
+// the controller's frames and the direction overlay: two seconds of nothing,
+// suppressed to protect nothing. Level 0 is also how HA's media-player mute
+// arrives (controller/em_output_mute.py sends 0, remembers the level, and
+// re-sends 0 on every reconnect while muted), and a mute is not a volume
+// anybody wants read off the ring. The device cannot tell the two apart and
+// must not have to: an arc has nothing to say about either. The button paths
+// cannot reach 0 at all — clampToButtonBand holds them at
+// volumeButtonFloor — so this gate is invisible to them.
 func (vc *volumeController) Set(level int, showRing bool) bool {
 	if level < volumeMin {
 		level = volumeMin
@@ -130,7 +161,7 @@ func (vc *volumeController) Set(level int, showRing bool) bool {
 	}
 
 	log.Printf("Volume set to %d/%d", level, volumeMax)
-	if showRing {
+	if showRing && level > volumeMin {
 		vc.showLEDs(level)
 	}
 	if cb != nil {

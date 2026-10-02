@@ -175,12 +175,16 @@ func (s *Server) VolumeStepDown() bool {
 	return s.volume.StepDown()
 }
 
-// SetVolume sets volume to an explicit level (0–volumeMax) — called by controller
-// command. Remote changes don't paint the volume arc: nobody is at the
-// device, and the ring lighting up unprompted reads as a glitch.
+// SetVolume sets volume to an explicit level (0–volumeMax) — called by
+// controller command, which is how HA's media player, a service call or an
+// automation reaches the device. It paints the arc like a button press does:
+// the change was asked for, and the ring is how the owner sees it applied
+// (#634). A press makes the device's level authoritative too (see
+// volumeSeeded), so a config push arriving later this run must not override
+// it.
 func (s *Server) SetVolume(level int) {
 	s.volumeSeeded.Store(true)
-	s.volume.Set(level, false)
+	s.volume.Set(level, true)
 }
 
 // SeedVolume restores the controller's stored startupVolume — the source of
@@ -189,6 +193,13 @@ func (s *Server) SetVolume(level int) {
 // volume change against a stale config snapshot, and going through Set()
 // (rather than the raw tinymix write this replaced) keeps the recorded
 // level, HA entity, and hardware in agreement.
+//
+// showRing is false and must stay false, though it is the only other caller of
+// Set() that passes it: this is a restore of a level the user set on some
+// earlier run, not a change they just made. Painting it would light the ring
+// on every boot — and the boot-time mute restore beside it already does that
+// deliberately, so a restore that paints is a second unasked-for cue on the
+// same boot.
 func (s *Server) SeedVolume(level int) {
 	if s.volumeSeeded.Swap(true) {
 		return

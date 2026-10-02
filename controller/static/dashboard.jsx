@@ -2103,6 +2103,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
               ? `${s.cpuPct.toFixed(0)}%` + (s.coresOnline ? ` · ${s.coresOnline}/${s.coresTotal ?? '?'} cores` : '')
               : null;
             const lq = device.linkQuality;   // loss verdict + per-minute strip (em_tcp)
+            const linkRow = _linkRow(device); // TLS + token, not TLS alone (#590)
             // Thermals: mtktscpu is the CPU zone, maxTempC the hottest of all
             // 11 zones (the PMIC and board sensors can run warmer). Amber past
             // 70C, red past 85C — well below this SoC's limits, because the
@@ -2175,15 +2176,11 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
                          : (s?.volumePct != null ? `${s.volumePct}%` : '—'))}
                     {/* An offline Echo the controller is turning away says why,
                         in the row that describes its link rather than a new one. */}
-                    {row('Link', device.connected
-                           ? (device.linkTls ? 'wss (TLS)' : 'plain ws')
-                           : device.linkRefused
-                             ? <span title="Remove this Echo and approve it again to pair it.">
-                                 {`Refused: ${device.linkRefused.reason}`}
-                               </span>
-                             : '—',
-                         device.connected ? (device.linkTls ? 'var(--ok)' : 'var(--warn)')
-                           : device.linkRefused ? 'var(--error)' : undefined)}
+                    {row('Link',
+                         linkRow.refused
+                           ? <span title="Remove this Echo and approve it again to pair it.">{linkRow.label}</span>
+                           : linkRow.label,
+                         linkRow.color)}
                     {/* The eMMC's own wear report and how the current boot
                         started (schema v28). A watchdog or panic boot is the
                         sign of a hang nobody saw. Both are absent on firmware
@@ -3141,6 +3138,36 @@ function _middleEllipsis(text, max, tail) {
 
 function _baseOsLabel(baseOs) {
   return baseOs === 'emos' ? 'emOS' : baseOs === 'fireos' ? 'FireOS 5' : null;
+}
+
+// What the Status tab's Link row reads, and in what colour.
+//
+// "wss (TLS)" in green is the check everybody runs before flipping
+// REQUIRE_DEVICE_TLS, so it must not be printed for a link the controller has
+// no token for. em_linkauth.decide rule 4 wants secure AND presented AND
+// expected: a device connected over TLS with nothing on record clears the
+// first two and is locked out by the flip, while its card looked perfect.
+// Seen on the EA controller 2026-09-20 — one device logging "token presented
+// but none on record" on every plane on every dial, reading green throughout.
+//
+// Encrypted is not authenticated, so a missing token is amber whatever the
+// transport is: the row is the answer to "is this link safe", and green
+// asserts more than the controller can support.
+//
+// An ABSENT linkTokenIssued is not a measurement. A dashboard served by an
+// older controller has never heard of the field, so it keeps today's reading
+// rather than claiming "no token" on every device at once — the same
+// NULL-not-zero rule the rest of this file lives by.
+function _linkRow(device) {
+  if (!device.connected) {
+    return device.linkRefused
+      ? { label: `Refused: ${device.linkRefused.reason}`, color: 'var(--error)', refused: true }
+      : { label: '—', color: undefined };
+  }
+  if (!device.linkTls) return { label: 'plain ws', color: 'var(--warn)' };
+  return device.linkTokenIssued === false
+    ? { label: 'wss (TLS) · no token', color: 'var(--warn)' }
+    : { label: 'wss (TLS)', color: 'var(--ok)' };
 }
 
 // The kernel's word size from `uname -m`: "64-bit" or "32-bit". On biscuit it

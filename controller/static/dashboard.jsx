@@ -3338,36 +3338,22 @@ function _kernelTitle(d) {
   return d.kernelArch ? `kernel ${d.kernelArch} ${d.kernelRelease || ''}`.trim() : null;
 }
 
-// What deleting a device leaves behind in Home Assistant, in the operator's
-// terms (#375). Two correct decisions meet here.
-//
-// A device's ESPHome identity is DERIVED from its serial — the stored MAC is
-// md5(device_id), the mDNS service name is `echomuse-<last 12 of the serial>` —
-// so a device deleted and re-approved advertises the same name and the same MAC
-// as before. Its port is not derived: `assign_esphome_port` only moves the
-// counter forwards, and a deleted device's satellite is dropped so a re-added
-// one is allocated fresh, because deleting is often how a device is moved off
-// a colliding port. HA then holds a config entry with the name and MAC it
-// already had, pointing at a port nobody listens on; discovery sees a service
-// it already has an entry for and offers nothing new, and the entry keeps
-// dialling the dead port. Reproduced on 2.22.0-ea.4, 2026-08-28, and the only
-// way out — deleting the entry by hand — is nowhere written down.
-//
-// Naming the port is the whole point: it is what the stale entry is keyed on
-// and what the operator has to go and match. "Home Assistant may be confused"
-// is the kind of warning people learn to dismiss.
+// What deleting a device leaves behind in Home Assistant (#375). The identity
+// is derived from the serial — so a re-approved device keeps the name and MAC
+// HA has already made an entry for — but the port is not, and the re-added one
+// is allocated fresh. HA is left pointing at a port nobody listens on, and
+// discovery will not offer it again. Naming that port is what the operator has
+// to go and match in HA.
 //
 // A NULL port is a device that never had a satellite, so there is no number to
-// name — but the rest is still true, and the sentence still has to say it.
-// `!= null` rather than a truthiness test, so a 0 is reported as 0 instead of
-// swallowed: absence stores as NULL, never 0, so conflating them here would
-// repeat the mistake.
+// name — the sentence still has to say it. `!= null` rather than a truthiness
+// test, so a 0 is reported as 0 instead of swallowed: absence stores as NULL,
+// never 0.
 const _deleteHaWarning = (d) => {
   const who  = (d && (d.label || d.device_id)) || 'this device';
   const port = d && d.esphome_port != null ? ` on port ${d.esphome_port}` : '';
-  return `Home Assistant keys its entries on the port, so deleting this record `
-       + `leaves its entry for ${who}${port} behind. Delete that entry in Home `
-       + `Assistant before adding ${who} back — it is not offered a second time.`;
+  return `Home Assistant keeps its entry for ${who}${port}. Delete it there `
+       + `before adding this Echo back.`;
 };
 
 const _INIT_RC_APPEND = `

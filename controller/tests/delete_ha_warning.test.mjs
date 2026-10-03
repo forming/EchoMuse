@@ -70,9 +70,7 @@ for (const bad of NEVER) {
 // load-bearing: what to do, and when.
 check("it says where the entry lives", /Home Assistant/.test(named), named);
 check("it says to delete the entry before adding the device back",
-      /delete that entry in home assistant before adding/i.test(named), named);
-check("it says the device is not offered a second time",
-      /not offered a second time/i.test(named), named);
+      /delete it there before adding/i.test(named), named);
 
 // ── No port on record ──
 // A device that never had a satellite: the row is pending, or the port was
@@ -90,7 +88,7 @@ for (const [what, device, named] of [
   }
   check(`${what} still names the device`, w.includes(named), w);
   check(`${what} still says to delete the entry first`,
-        /delete that entry in home assistant before adding/i.test(w), w);
+        /delete it there before adding/i.test(w), w);
 }
 
 // Absence stores as NULL, never 0 — so a 0 is a value the dashboard must show
@@ -113,7 +111,16 @@ check("an unlabelled device is named by its serial",
 check("an unlabelled device does not read as broken",
       !/\s{2,}/.test(unlabelled)
       && !unlabelled.includes("''")
-      && unlabelled.endsWith("time."), unlabelled);
+      && unlabelled.startsWith("Home Assistant keeps its entry for ")
+      && unlabelled.endsWith(" back."), unlabelled);
+
+// UI copy is a clause or two. The first version restated the whole mechanism
+// and told the reader why Home Assistant keys what it keys on, which is a fact
+// about HA rather than something the operator can act on.
+check("the banner is short enough to read before confirming",
+      named.split(/[.!?]/).filter(Boolean).length <= 2, named);
+check("it does not explain HA's keying to the operator",
+      !/keys/i.test(named), named);
 check("a device with neither label nor id still reads as a sentence",
       _deleteHaWarning({}).includes("this device"), _deleteHaWarning({}));
 

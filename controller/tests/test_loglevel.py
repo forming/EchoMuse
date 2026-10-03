@@ -97,15 +97,43 @@ def test_pair_with_no_equals_is_reported(levels_restored):
     assert "name=LEVEL" in parsed.problems[0]
 
 
-def test_dotless_name_is_reported(levels_restored):
+def test_a_dotless_name_that_logs_is_honoured(levels_restored):
     """
-    `player=DEBUG` is the mistake #378 was opened for: a bare name cannot be
-    reached by `echomuse=DEBUG`, so honouring it would hand back exactly the
-    control the hierarchy exists to provide.
+    `echomuse` and `aiohttp` are real loggers, so setting the root of a
+    hierarchy is the obvious thing to want to do — and refusing it left the
+    documented example of the feature unusable.
     """
-    parsed = em_loglevel.parse("player=DEBUG")
-    assert parsed.levels == {}
-    assert "hierarchy" in parsed.problems[0]
+    name = _make("dotless")                       # no dot, and it does log
+    result = em_loglevel.apply(f"{name}=DEBUG")
+    assert result.problems == ()
+    assert logging.getLogger(name).level == logging.DEBUG
+
+
+def test_every_documented_example_applies(levels_restored):
+    """
+    The examples in `.env.example`, the add-on option's help text and this
+    module's own docstring are the three places somebody copies from, and the
+    first version of this refused two of the three. Push each one through
+    `apply()` rather than restating them, so a doc that drifts fails here.
+    """
+    # The third-party names are documented because they are the ones people
+    # reach for, and both are live in the controller. The suite imports neither
+    # package, so a logger is only in the manager's table once something has
+    # asked for it — materialise them the way importing them would.
+    for live in ("echomuse", "echomuse.esphome", "aiohttp", "aiohttp.access"):
+        _make(live)
+
+    documented = {
+        "echomuse": logging.DEBUG,           # the dotless root
+        "echomuse.esphome": logging.DEBUG,
+        "aiohttp.access": logging.INFO,
+        "aiohttp": logging.DEBUG,            # the other dotless one
+    }
+    spec = ",".join(f"{n}={logging.getLevelName(lv)}" for n, lv in documented.items())
+    result = em_loglevel.apply(spec)
+    assert result.problems == (), result.problems
+    for name, want in documented.items():
+        assert logging.getLogger(name).level == want, name
 
 
 # ── Applying it ──────────────────────────────────────────────────────────────

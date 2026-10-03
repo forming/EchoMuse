@@ -34,9 +34,11 @@ logged as the bare name `player`, so no `echomuse` level could ever have
 reached the loudest logger in the tree, and it looked correct only because
 an unset DEBUG left it inheriting the root level by accident.
 
-So a name with NO dot is refused rather than honoured: `player=DEBUG` is
-almost always that same mistake, and honouring it would give back the
-control the hierarchy exists to provide.
+A DOTLESS NAME IS HONOURED, because `echomuse` and `aiohttp` are real
+loggers and setting the root of a hierarchy is the obvious thing to want
+to do. The mistake this would otherwise hide — `player=DEBUG` for a
+logger that ought to be `echomuse.player` — is caught below instead, by
+the name naming no logger anything logs to.
 
 A NAME NOTHING LOGS TO IS SKIPPED, AND SAYS SO
 ----------------------------------------------
@@ -49,8 +51,8 @@ module that logs under it exists and will apply once it does.
 
 A BAD PAIR WARNS, IT DOES NOT STOP THE CONTROLLER
 -------------------------------------------------
-An unknown level, a pair with no `=`, a dotless name: each is a warning
-and the rest of the string still applies. This is `em_start.py`'s choice
+An unknown level, a pair with no `=`, a name nothing logs to: each is a
+warning and the rest of the string still applies. This is `em_start.py`'s choice
 for one stray option key, and for the same reason — an add-on that refuses
 to boot over a typo in a DIAGNOSTICS setting has turned a support problem
 into an outage, and the person who has to solve it cannot get to a log.
@@ -105,12 +107,6 @@ def parse(spec: str) -> Overrides:
         name, level = name.strip(), level.strip()
         if not sep or not name or not level:
             problems.append(f"{pair!r} is not name=LEVEL")
-            continue
-        if "." not in name:
-            problems.append(
-                f"{name!r} names no hierarchy — LOG_LEVELS sets levels by "
-                "area (echomuse.db, aiohttp.access), and a dotless name "
-                "cannot be reached by echomuse=DEBUG")
             continue
         value = logging.getLevelNamesMapping().get(level.upper())
         if value is None:

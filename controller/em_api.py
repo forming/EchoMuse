@@ -3994,6 +3994,12 @@ async def _get_system_status(request: web.Request) -> web.Response:
         "total_devices":  len(all_rows),
         "pending":        sum(1 for r in all_rows if not r["approved"]),
         "approval_mode":  db.get_config("device_approval", "strict"),
+        # Settings that will not do what this deployment assumes (#629) — a
+        # DB_PATH left unset writes the database, the device CA and the
+        # recordings inside the container. Advisory like the update notice
+        # below: the fix is the operator's own compose/.env edit, so there is
+        # deliberately no action here.
+        "env_warnings": _env_warnings(),
         # Whether the BACKGROUND poll runs (#159). With it off, "No release
         # info" and a GitHub outage are indistinguishable from the Updates
         # tab, and the tab is where someone goes to find out — so the reason
@@ -4041,6 +4047,42 @@ def _running_controller_module():
     if main is not None and hasattr(main, "_loop_lag_peak_ms"):
         return main
     return sys.modules.get("em_controller")
+
+
+def _env_warnings() -> list[str]:
+    """
+    Operator-facing settings that will not do what the deployment assumes.
+    Empty is the normal case; a non-empty entry names the fix.
+
+    #629: DB_PATH's default is the RELATIVE "echomuse.db", which resolves
+    against the image's WORKDIR (/app) rather than the compose volume
+    (/app/data). With no .env the database, the device-link CA and server
+    cert (em_pki derives its directory from DB_PATH's parent) and the
+    recordings all land in the container's writable layer and go on every
+    recreate — three hours lost to a settings file nobody was told existed.
+    .env.example has always documented the right value; nothing said the
+    file was load-bearing.
+
+    "Is DB_PATH set", not "is the database on a mount": setting it is
+    exact, portable and free, true under the deploy compose iff .env
+    supplied it, always true under the add-on (config.yaml pins it), and
+    false on bare metal where it is genuinely broken too. An st_dev
+    comparison would false-positive on overlayfs and would need an "am I in
+    a container" branch to mean anything at all.
+
+    The warning is only true while that default is RELATIVE — an absolute
+    default would make every word of it a lie. tests/test_deploy.py pins
+    the literal for exactly that reason.
+    """
+    out = []
+    if not os.environ.get("DB_PATH", "").strip():
+        out.append(
+            "DB_PATH is not set, so the database, the device certificates and "
+            "the recordings are written inside the container and lost on every "
+            "recreate. Put DB_PATH=/app/data/echomuse.db in .env, alongside the "
+            "./data:/app/data volume — see controller/.env.example."
+        )
+    return out
 
 
 @auth.require_admin

@@ -442,6 +442,52 @@ def test_controller_update_is_advisory_only():
             f"{verb} on /api/releases/controller would make the update actionable"
 
 
+def test_unset_db_path_is_reported_and_never_acted_on():
+    """
+    #629: an unset DB_PATH means the database, the device CA and the
+    recordings are written INSIDE the container and discarded on every
+    recreate — three hours of a support conversation, one settings file.
+    .env.example has always carried the right value; nothing said the file
+    was load-bearing.
+
+    The dashboard must therefore say so, and — like the update notice above
+    — must say so WITHOUT offering to act: the fix is the operator's own
+    .env/compose edit, and this process writing files for them is exactly
+    the remote-write primitive issue #629's wizard suggestion would have
+    been.
+    """
+    root = Path(__file__).resolve().parent.parent
+
+    api = (root / "em_api.py").read_text()
+    assert '"env_warnings": _env_warnings()' in api, \
+        "the status handler must surface _env_warnings()"
+    fn = api[api.index("def _env_warnings("):]
+    fn = fn[:fn.index("\ndef ", 1)]
+    for word in ("DB_PATH=/app/data/echomuse.db", ".env.example"):
+        assert word in fn, f"the warning must name the fix ({word})"
+
+    # The warning is only true while the default is RELATIVE: it resolves
+    # against the image's WORKDIR (/app), not the compose volume
+    # (/app/data). An absolute default would make every word of it a lie,
+    # which is why the literal is pinned rather than trusted.
+    ctrl = (root / "em_controller.py").read_text()
+    assert re.search(r'DB_PATH",\s*"echomuse\.db"', ctrl), \
+        ("DB_PATH's default must stay the RELATIVE 'echomuse.db' — an "
+         "absolute one resolves inside the container anyway, so the "
+         "env_warnings message would be false and should be deleted")
+
+    jsx = (root / "static" / "dashboard.jsx").read_text()
+    assert "status?.env_warnings" in jsx, \
+        "the banner must render the warnings the dashboard already polls"
+    start = jsx.index("{/* Deployment warnings (#629).")
+    banner = jsx[start:jsx.index("{/* Privacy,", start)]
+    for forbidden in ("API.post", "API.put", "API.delete", "onClick"):
+        assert forbidden not in banner, (
+            f"the storage warning must not perform actions, found "
+            f"{forbidden!r} — the fix is the operator's own .env edit"
+        )
+
+
 def test_controller_notes_come_from_the_tag_annotation():
     """
     controller-v* tags ship a GHCR image and no GitHub Release (CLAUDE.md,

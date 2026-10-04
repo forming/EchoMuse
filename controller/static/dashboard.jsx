@@ -11002,6 +11002,35 @@ function App() {
         </div>
       )}
 
+      {/* Deployment warnings (#629).
+          Rendered only when /api/system/status carries env_warnings, which
+          is the normal case being nothing at all here.
+
+          Advisory, like the notice above: no button, and nothing to POST —
+          the fix is the operator's own .env/compose edit, which this process
+          cannot make on their behalf. Drawn from the status the dashboard
+          already polls, so there is no fetch and no state of its own. */}
+      {status?.env_warnings?.length > 0 && (
+        <div className="em-ctrl-update em-on-dark" style={{
+          background: 'var(--notice-bg)',
+          border: '1px solid var(--notice-line)', borderRadius: 8,
+          padding: '14px 18px', marginBottom: 24,
+        }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+            <span style={{ fontFamily:"'DM Mono',monospace", fontSize:8, color:'var(--warn)',
+                           textTransform:'uppercase', letterSpacing:'0.15em' }}>
+              Storage not persisted
+            </span>
+          </div>
+          {status.env_warnings.map((w, i) => (
+            <div key={i} style={{
+              fontFamily:"'DM Mono',monospace", fontSize:10, color:'var(--text2)',
+              lineHeight:1.65, marginTop:10, wordBreak:'break-word',
+            }}>{w}</div>
+          ))}
+        </div>
+      )}
+
       {/* Privacy, in one line (docs/listening.md) — from what each Echo
           reports, never from configuration alone. */}
       {listenFleetText(devices) && (

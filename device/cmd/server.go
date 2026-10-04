@@ -564,15 +564,26 @@ func main() {
 		syncListenState(dataClient, controlClient, false)
 	})
 
-	// Wake sound on request (#120), for wakes outside a private-listening
-	// session; the controller sends it only once the wake has won
-	// arbitration. A session's wake sound plays on its listen_ack instead.
+	// Cues the controller asks for: the wake sound (#120) for a wake outside
+	// a private-listening session — the controller sends it only once the
+	// wake has won arbitration, and a session's plays on its listen_ack
+	// instead — and the two ends of the speech-to-text bracket (#683).
+	//
+	// An unrecognised name is IGNORED, not an error, and stays that way: a
+	// controller older than this firmware sends only what it knows, and
+	// failing a message over a cue nobody would have heard makes the link
+	// noisier for no gain.
 	controlClient.OnPlayCue(func(name string) {
-		if name != "wake" {
+		switch name {
+		case "wake":
+			playWakeCue(pcmSpeaker)
+		case "stt_start":
+			playSTTCue(pcmSpeaker, false)
+		case "stt_end":
+			playSTTCue(pcmSpeaker, true)
+		default:
 			log.Printf("[cue] unknown cue %q — ignored", name)
-			return
 		}
-		playWakeCue(pcmSpeaker)
 	})
 
 	controlClient.OnSendspinToken(sendspinToken)
@@ -1337,6 +1348,44 @@ func playWakeCue(spk *speaker.PcmSpeaker) {
 		c = wakeCues[cue.LevelMedium]
 	}
 	spk.PlayCue(c)
+}
+
+// sttPair is the two ends of the speech-to-text bracket (#683), pre-rendered
+// at one level. Which end plays is decided by pitch ORDER, so both are held
+// rather than rendered at play time.
+type sttPair struct{ start, end []float64 }
+
+// sttCues holds that pair at each level, rendered once for wakeCues' reason:
+// this fires on every turn, twice, and rendering it inline would put a few
+// thousand sin() calls on the turn's critical path.
+var sttCues = func() map[string]sttPair {
+	m := make(map[string]sttPair, len(cue.Levels))
+	for _, lv := range cue.Levels {
+		db := cue.LevelDBFS(lv)
+		m[lv] = sttPair{
+			start: cue.STTCueStart(speakerRate, db),
+			end:   cue.STTCueEnd(speakerRate, db),
+		}
+	}
+	return m
+}()
+
+// playSTTCue plays one end of the speech-to-text bracket at its configured
+// level, if the cues are on. Anything unrecognised plays medium.
+func playSTTCue(spk *speaker.PcmSpeaker, end bool) {
+	on, level := config.Get().STTSoundSetting()
+	if !on || spk == nil {
+		return
+	}
+	p, ok := sttCues[level]
+	if !ok {
+		p = sttCues[cue.LevelMedium]
+	}
+	if end {
+		spk.PlayCue(p.end)
+		return
+	}
+	spk.PlayCue(p.start)
 }
 
 // playVolumeCue previews the newly selected device volume. PlayCue is mixed

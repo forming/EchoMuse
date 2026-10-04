@@ -1360,6 +1360,13 @@ async def _apply_live_config(device_id: str, live, effective: dict) -> None:
     # it is the one where the setting would otherwise silently do nothing.
     if "wakeSound" in effective:
         live.wake_sound = bool(effective["wakeSound"])
+    # #683, and the same rule as wakeSound above: the device renders the cue
+    # but the CONTROLLER decides when to ask, so this mirror is what makes the
+    # setting take effect on the turn you save it on rather than at the next
+    # reconnect. sttSoundLevel has no mirror for wakeSoundLevel's reason — the
+    # device reads its own level off the push.
+    if "sttSound" in effective:
+        live.stt_sound = bool(effective["sttSound"])
     if "micGainDb" in effective:
         live.mic_gain_db = float(effective["micGainDb"])
     if "owwOnDevice" in effective:
@@ -6561,6 +6568,7 @@ def _merge_device(row, boot: dict | None = None) -> dict:
         "owwLocalCapable": getattr(live, "oww_local_capable", False) if live else False,
         "listen":          _listen_json(live) if live else None,
         "wakeCueCapable": getattr(live, "wake_cue_capable", False) if live else False,
+        "sttCueCapable": getattr(live, "stt_cue_capable", False) if live else False,
         "volumeCueCapable": getattr(live, "volume_cue_capable", False) if live else False,
         # Sendspin player (#89): whether the firmware has one, and its status
         # (no secrets; the pairing token is its own request).

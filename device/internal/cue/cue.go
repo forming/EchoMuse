@@ -72,6 +72,25 @@ const (
 	volumePeakDB = -3.0
 )
 
+// The STT cues (#683) bracket the speech-to-text window: two short notes
+// RISING when listening opens, and the SAME two pitches FALLING when it
+// closes. Direction is the whole of the bracket — a falling interval reads as
+// "done", which is exactly what the close of a listening window is, and the
+// wake cue already owns "rising" for "I heard you". Two cues that rose
+// together would be indistinguishable from each other and from the wake cue
+// that precedes them, which is the one failure this pair cannot have.
+//
+// A perfect fifth (D5→A5) rather than the wake cue's perfect fourth, and a
+// quarter of its length: this fires on EVERY turn, seconds after the wake cue,
+// and a cue people turn off is the failure mode worth designing out. Same
+// pitches in both directions makes the two ends one gesture out and back, so
+// the pair is recognisable as a pair rather than as two unrelated noises.
+const (
+	sttLowHz  = 587.0 // D5
+	sttHighHz = 880.0 // A5 — a perfect fifth above
+	sttNoteMS = 70.0
+)
+
 // The wake sound's three levels, as set by `wakeSoundLevel`.
 const (
 	LevelQuiet  = "quiet"
@@ -102,17 +121,36 @@ func LevelDBFS(level string) float64 {
 // WakeCue renders the cue at the given sample rate and peak level, in S16
 // units (±32768) to match everything else on the speaker path.
 func WakeCue(sampleRate int, peakDBFS float64) []float64 {
+	return twoNotes(sampleRate, peakDBFS, BingHz, bingMS, BongHz, bongMS)
+}
+
+// STTCueStart renders the cue for the opening of the speech-to-text window,
+// and STTCueEnd the cue for its close — same pitches, opposite direction.
+func STTCueStart(sampleRate int, peakDBFS float64) []float64 {
+	return twoNotes(sampleRate, peakDBFS, sttLowHz, sttNoteMS, sttHighHz, sttNoteMS)
+}
+
+func STTCueEnd(sampleRate int, peakDBFS float64) []float64 {
+	return twoNotes(sampleRate, peakDBFS, sttHighHz, sttNoteMS, sttLowHz, sttNoteMS)
+}
+
+// twoNotes renders the shape every cue here is built from: two pitched notes
+// with a gap between them, so the pitch ORDER is the only thing distinguishing
+// the three of them. Both ends take the level the same way — an absolute peak
+// in dBFS, because the cue mixer sits after the software volume and the DAC is
+// held at unity.
+func twoNotes(sampleRate int, peakDBFS, firstHz, firstMS, secondHz, secondMS float64) []float64 {
 	fs := float64(sampleRate)
 	amp := math.Pow(10, peakDBFS/20.0) * 32768.0
 
-	bing := note(fs, BingHz, bingMS, amp)
+	first := note(fs, firstHz, firstMS, amp)
 	gap := int(fs * gapMS / 1000.0)
-	bong := note(fs, BongHz, bongMS, amp)
+	second := note(fs, secondHz, secondMS, amp)
 
-	out := make([]float64, 0, len(bing)+gap+len(bong))
-	out = append(out, bing...)
+	out := make([]float64, 0, len(first)+gap+len(second))
+	out = append(out, first...)
 	out = append(out, make([]float64, gap)...)
-	out = append(out, bong...)
+	out = append(out, second...)
 	return out
 }
 

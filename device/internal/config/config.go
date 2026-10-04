@@ -58,6 +58,16 @@ type Device struct {
 	// WakeSoundLevel is "quiet", "medium" or "loud" (internal/cue).
 	WakeSoundLevel string
 
+	// STTSound plays a short tone pair when the speech-to-text window opens
+	// and the same pair reversed when it closes (#683). Off by default, and
+	// separately switchable from WakeSound because it answers a different
+	// question: WakeSound says the device heard you, this says the device is
+	// now listening and has stopped. Same accessibility argument — a device
+	// out of sight gives no other sign that the window opened or closed.
+	STTSound bool
+	// STTSoundLevel is "quiet", "medium" or "loud" (internal/cue).
+	STTSoundLevel string
+
 	// OwwOnDevice selects on-device wake word scoring: "off", "shadow" or
 	// "on".
 	//
@@ -195,6 +205,8 @@ func (d *Device) loadDefaults() {
 	d.DuckDb = envFloat("DUCK_DB", -18)
 	d.WakeSound = envBool("WAKE_SOUND", false)
 	d.WakeSoundLevel = envStr("WAKE_SOUND_LEVEL", "medium")
+	d.STTSound = envBool("STT_SOUND", false)
+	d.STTSoundLevel = envStr("STT_SOUND_LEVEL", "medium")
 	d.AdcDigitalGain = envInt("ADC_DIGITAL_GAIN", 88)
 	d.AdcMicpga = envInt("ADC_MICPGA", 40)
 	d.MicGainDb = clampMicGainDb(envInt("MIC_GAIN_DB", 24))
@@ -267,6 +279,14 @@ func (d *Device) Apply(msg ConfigMessage) {
 	if msg.WakeSoundLevel != "" {
 		d.WakeSoundLevel = msg.WakeSoundLevel
 	}
+	// Pointer for WakeSound's reason: the push is a partial update, so "off"
+	// must be expressible and must not read as "field absent".
+	if msg.STTSound != nil {
+		d.STTSound = *msg.STTSound
+	}
+	if msg.STTSoundLevel != "" {
+		d.STTSoundLevel = msg.STTSoundLevel
+	}
 	if msg.VolumeButtonSound != nil {
 		d.VolumeButtonSound = *msg.VolumeButtonSound
 	}
@@ -326,6 +346,14 @@ func (d *Device) WakeSoundSetting() (on bool, level string) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.WakeSound, d.WakeSoundLevel
+}
+
+// STTSoundSetting reports whether the speech-to-text cues are on, and at what
+// level. Separate from WakeSoundSetting because they are separate settings.
+func (d *Device) STTSoundSetting() (on bool, level string) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.STTSound, d.STTSoundLevel
 }
 
 // VolumeButtonSoundEnabled reports whether physical volume changes should
@@ -500,6 +528,10 @@ type ConfigMessage struct {
 	WakeSoundLevel string `json:"wakeSoundLevel,omitempty"`
 	// VolumeButtonSound: a pointer so "off" is distinguishable from absent.
 	VolumeButtonSound *bool `json:"volumeButtonSound,omitempty"`
+	// STTSound: a pointer so "off" is distinguishable from absent, for
+	// WakeSound's reason — it rides the same partial-update push.
+	STTSound      *bool  `json:"sttSound,omitempty"`
+	STTSoundLevel string `json:"sttSoundLevel,omitempty"`
 
 	// Output chain (internal/outchain). Pointers because zero is a real
 	// setting for every one of them; see applyOutput.

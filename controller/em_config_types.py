@@ -62,6 +62,10 @@ KINDS: dict[str, str] = {
     "sendspinUnpaired": BOOL,
     "wakeSound": BOOL,
     "wakeSoundLevel": STR,
+    # sttSound is a *bool on the wire, so "off" reaches the device rather than
+    # reading as an absent field on a partial push (#683).
+    "sttSound": BOOL,
+    "sttSoundLevel": STR,
     "volumeButtonSound": BOOL,
     "eqBands": FLOAT_LIST,
     "eqLoudness": BOOL,

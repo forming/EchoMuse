@@ -2455,6 +2455,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
                 localCapable={!device.connected || !!device.owwLocalCapable}
                 listen={device.connected ? device.listen : null}
                 wakeCueCapable={!device.connected || !!device.wakeCueCapable}
+                sttCueCapable={!device.connected || !!device.sttCueCapable}
                 volumeCueCapable={!device.connected || !!device.volumeCueCapable}
                 sendspinCapable={!device.connected || !!device.sendspinCapable}
                 sendspinPanel={device.connected && device.sendspinCapable
@@ -9199,7 +9200,7 @@ const STAGE_MONO = "'DM Mono',monospace";
 // be silently wrong.
 const CONFIG_SECTIONS = {
   "playback": ["eqBands", "eqLoudness", "duckDb", "limiterEnabled", "limiterThreshold", "limiterRelease", "bassGuardEnabled", "bassGuardDb", "streamReply", "volumeButtonSound"],
-  "wakeword": ["owwModel", "owwThreshold", "owwSpeexNs", "bargeInEnabled", "bargeInThreshold", "wakeArbitrationMs", "owwOnDevice", "wakeSound", "wakeSoundLevel", "wakeClipCapture", "wakeClipMinScore"],
+  "wakeword": ["owwModel", "owwThreshold", "owwSpeexNs", "bargeInEnabled", "bargeInThreshold", "wakeArbitrationMs", "owwOnDevice", "wakeSound", "wakeSoundLevel", "sttSound", "sttSoundLevel", "wakeClipCapture", "wakeClipMinScore"],
   "microphones": ["adcMicpga", "adcDigitalGain", "micGainDb", "beamformingEnabled", "beamAngle", "aecEnabled", "aecDelayMs", "aecTailMs", "aecRefSource", "nsAsr", "saveUtterances"],
   "ring": ["ledScene", "ledListenColor", "ledThinkColor", "meterAttack", "meterDecay", "meterFloor", "meterGamma", "meterRef", "meterCurve"],
   "advanced": ["agcEnabled", "vadThreshold", "vadSpeechMs", "vadSilenceMs", "buttonSingleTapEvent", "buttonMultiTapMs", "consolePassword", "consoleTimeoutMin", "controllerEndpoints"],
@@ -9363,6 +9364,7 @@ function DeviceConfigForm({ config, onChange, disabled, sections, onScopeChange,
                             localCapable = true, listen = null,
                             hwEchoRef = false, hwRefCapable = true,
                             emosFleet = true, wakeCueCapable = true,
+                            sttCueCapable = true,
                             volumeCueCapable = true, sendspinCapable = true,
                             sendspinPanel = null }) {
   // emosFleet defaults TRUE for the same reason the capability props above do,
@@ -9761,6 +9763,27 @@ function DeviceConfigForm({ config, onChange, disabled, sections, onScopeChange,
                     { value: 'loud',   label: 'Loud' },
                   ]}
                   onChange={v => set('wakeSoundLevel', v)}/>
+              )}
+              {/* The other half of the audible story (#683): two tones that
+                  bracket the speech-to-text window, so an Echo out of sight
+                  says it is listening now and has stopped. A separate switch
+                  from the wake sound because it answers a different question
+                  — and because it fires on EVERY turn, seconds after the wake
+                  cue, so it is not a thing to turn on and leave. */}
+              <Toggle label="Listening cues"
+                sub={sttCueCapable ? 'a tone when the Echo starts listening for your request, and another when it has finished' : 'needs newer firmware on this Echo'}
+                disabled={!sttCueCapable}
+                value={config.sttSound ?? false}
+                onChange={v => set('sttSound', v)}/>
+              {sttCueCapable && (config.sttSound ?? false) && (
+                <Select label="Listening cue level"
+                  value={config.sttSoundLevel ?? 'medium'}
+                  options={[
+                    { value: 'quiet',  label: 'Quiet' },
+                    { value: 'medium', label: 'Medium' },
+                    { value: 'loud',   label: 'Loud' },
+                  ]}
+                  onChange={v => set('sttSoundLevel', v)}/>
               )}
               {/* Where the wake word is detected (docs/listening.md). Two
                   choices; "shadow" is a developer diagnostic, set through the

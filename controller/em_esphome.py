@@ -476,6 +476,14 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         # cleared at turn end.
         self._on_tts_received   = None   # async callable(pcm_url_or_bytes)
         self._on_thinking       = None   # async callable()
+        # The opening half of the STT cue (#683). Separate from _on_thinking
+        # because only HA's VAD says when speech BEGAN; the device's own gate
+        # and the controller's SNR check both fire later and less reliably, and
+        # a cue at the wrong moment brackets nothing. The close rides
+        # _on_thinking, which _enter_thinking already funnels every
+        # end-of-speech route through — adding a second endpoint route there is
+        # what #370 was.
+        self._on_stt_start      = None   # async callable()
         # A turn can end in two places — HA's STT_VAD_END event, or our own
         # device VAD sentinel — and both mean "the user stopped talking".
         # _enter_thinking() is the single transition both call; this makes it
@@ -962,6 +970,8 @@ class EchoMuseSatellite(SatelliteServerProtocol):
             self._ha_vad_start.set()
             if self._trace and self._trace.t_vad_start_ms == -1:
                 self._trace.t_vad_start_ms = self._trace.elapsed_ms()
+            if self._on_stt_start:
+                em_tasks.spawn(self._on_stt_start())
 
         elif event_type == ET.VOICE_ASSISTANT_STT_VAD_END:
             # Speech ended — HA is now processing (STT → intent → TTS).
@@ -1290,6 +1300,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         self,
         device,            # em_controller.Device — avoids circular import
         on_thinking,       # async callable()
+        on_stt_start,      # async callable() — fired on HA's STT_VAD_START
         post_turn_play,    # async callable(pcm_chunks) -> decoded byte count
         trace: "TurnTrace | None" = None,
         preroll_discard: int = VOICE_PREROLL_DISCARD,
@@ -1304,6 +1315,9 @@ class EchoMuseSatellite(SatelliteServerProtocol):
 
         on_thinking() is called when STT_VAD_END arrives — the LED/state
         transition point into the thinking phase.
+        on_stt_start() is called on STT_VAD_START, the opening of the STT
+        window (#683). The close rides on_thinking, which _enter_thinking
+        calls from every end-of-speech route.
         post_turn_play(pcm_chunks) wraps the controller's streaming playback
         path: stateful EQ, stream_speaker, and acoustic-feedback drain.
 
@@ -1357,6 +1371,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         self._ha_vad_start.clear()
         self._thinking_entered = False
         self._on_thinking    = on_thinking
+        self._on_stt_start   = on_stt_start
         self._on_announce    = None   # set below after announcement path is confirmed
         self._trace          = trace  # may be None — all trace.x calls guard against this
 
@@ -1617,6 +1632,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
                 self.end_ha_run()
             self._barrier.end_turn()
             self._on_thinking    = None
+            self._on_stt_start   = None
             self._on_announce    = None
             self._trace          = None
             self._conversation_id = ""
@@ -3044,6 +3060,7 @@ async def _persist_turn(device, turn_record: dict) -> None:
 async def trigger_voice_turn(
     device,           # em_controller.Device
     on_thinking,      # async callable() — LED/state transition
+    on_stt_start,     # async callable() — fired on HA's STT_VAD_START (#683)
     post_turn_play,   # async callable(pcm_chunks) -> decoded byte count
     trigger_label: str = "unknown",  # "wakeword(0.522)" or "button" for trace
     preroll_discard: int = VOICE_PREROLL_DISCARD,
@@ -3111,6 +3128,7 @@ async def trigger_voice_turn(
         device=device,
         preroll_discard=preroll_discard,
         on_thinking=on_thinking,
+        on_stt_start=on_stt_start,
         post_turn_play=post_turn_play,
         trace=trace,
         wake_word_phrase=wake_word_phrase,

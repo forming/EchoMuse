@@ -54,6 +54,15 @@ DEFAULT_DEVICE_CONFIG = {
     # first, because the ring is the only other sign the Echo is listening.
     "wakeSound":        False,
     "wakeSoundLevel":   "medium",   # quiet / medium / loud, played by the Echo
+    # sttSound: the two tones that bracket the speech-to-text window (#683) —
+    # rising when it opens, the same two pitches falling when it closes. Off
+    # by default for wakeSound's reason: it fires on every turn, seconds after
+    # the wake cue, and a cue people turn off is worse than no cue. It is
+    # separately switchable because it answers a different question — the
+    # wake sound says the Echo heard you, this says it is listening now and
+    # has stopped, and from the next room the ring says neither.
+    "sttSound":         False,
+    "sttSoundLevel":    "medium",   # quiet / medium / loud, played by the Echo
     # Physical-button volume preview (#637). On by default, matching Alexa's
     # familiar feedback and giving a useful level reference while idle.
     "volumeButtonSound": True,

@@ -321,6 +321,25 @@ silent. That means the Echo waits to hear back from the controller first,
 one network round trip. Needs firmware that announces `wake_cue`; on older
 firmware the toggle is disabled and says so.
 
+### Listening cues
+Brackets the speech-to-text window: a tone when the Echo starts listening for
+your request, and another when it has finished. Off by default, because it
+fires on every turn — a cue people turn off is worse than no cue. It is a
+separate switch from **Wake sound** because it answers a different question.
+The wake sound says the Echo heard you; these say it is listening now and has
+stopped. From another room, or to someone who cannot see the ring, neither is
+implied by the other.
+
+**Listening cue level** sets it to Quiet, Medium or Loud, on the same terms
+as the wake sound level — the level is the same whatever the Echo's volume is.
+
+The two cues are the same two pitches, one rising and one falling, which is
+what makes them read as a pair rather than as two unrelated noises. The
+opening cue comes when Home Assistant's voice model decides speech has begun,
+so it is as late as it can be accurate and no later; a turn where nothing was
+said plays neither. Needs firmware that announces `stt_cue`; on older firmware
+the toggle is disabled and says so.
+
 ### Sensitivity (Precise ↔ Eager)
 The confidence bar the recogniser must clear.
 

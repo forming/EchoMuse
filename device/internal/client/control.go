@@ -968,9 +968,12 @@ func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInf
 			}
 
 		case "play_cue":
-			// A cue requested by the controller (#120): the wake sound for a
-			// wake outside a private-listening session, sent once it has won
-			// arbitration.
+			// A cue requested by the controller: "wake" (#120) for a wake
+			// outside a private-listening session, sent once it has won
+			// arbitration, and "stt_start"/"stt_end" (#683) for the two ends of
+			// the speech-to-text window. The NAME is passed through unexamined —
+			// which of them a given device can render is decided at the far end,
+			// where the renderers and the capability live.
 			var cueMsg struct {
 				Cue string `json:"cue"`
 			}
@@ -1267,6 +1270,13 @@ func capabilities() []string {
 	// "volume_cue": this firmware can play a physical-button volume preview
 	// at the new level, and suppress it while voice or music is audible.
 	//
+	// "stt_cue": this firmware can play a tone when the speech-to-text window
+	// opens and another when it closes (#683), on play_cue as "stt_start" and
+	// "stt_end". Separate from "wake_cue" rather than folded into it: the wake
+	// cue says the device heard you, these say it is listening now and has
+	// stopped, and someone with the wake sound off wants the bracket without
+	// the chime that interrupts their request.
+	//
 	// "pairing": this firmware asks to pair itself when its owner holds the
 	// action button 5 s (pairing.go). Without it the controller offers the
 	// admin a Pair action instead, since the device cannot ask.
@@ -1276,8 +1286,8 @@ func capabilities() []string {
 	// sendspin status, for the aec_hw_ref reason.
 	caps := []string{"mic", "speaker", "leds", "led_anim", "buttons",
 		"oww_shadow", "oww_trigger", "button_hold", "audio_mix",
-		"aec_hw_ref", "oww_local_only", "output_chain", "wake_cue", "volume_cue", "pairing",
-		"sendspin"}
+		"aec_hw_ref", "oww_local_only", "output_chain", "wake_cue", "volume_cue", "stt_cue",
+		"pairing", "sendspin"}
 	if als.Present() {
 		caps = append(caps, "ambient_light")
 	}

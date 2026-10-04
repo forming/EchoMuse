@@ -100,6 +100,44 @@ def test_volume_cue_capability_is_surfaced_to_the_dashboard():
         "the dashboard must gate the volume button sound on the capability"
 
 
+def test_stt_cue_capability_is_surfaced_to_the_dashboard():
+    """Old firmware must not be offered a switch it cannot honour (#683)."""
+    caps = device_capabilities()
+    assert "stt_cue" in caps, "firmware no longer announces stt_cue"
+    assert "stt_cue_capable" in CONTROLLER.read_text(), \
+        "em_controller must expose the stt cue capability as a property"
+    assert "sttCueCapable" in API.read_text(), \
+        "/api/devices must surface the stt cue capability"
+    jsx = (ROOT / "controller" / "static" / "dashboard.jsx").read_text()
+    assert "sttCueCapable" in jsx, \
+        "the dashboard must gate the listening cues on the capability"
+    assert "disabled={!sttCueCapable}" in jsx, \
+        "the listening cues toggle must be disabled, not inert, without it"
+
+
+def test_the_stt_cue_pair_is_sent_at_both_ends_of_the_window():
+    """
+    Both halves ride existing hooks rather than a new endpoint route (#683).
+
+    The close is the load-bearing one: it must go through on_thinking, which
+    em_esphome's _enter_thinking calls from BOTH end-of-speech routes (HA's
+    STT_VAD_END and the device VAD sentinel). Adding a third route there is
+    what #370 was, and this suite cannot import em_esphome to catch it.
+    """
+    ctrl = CONTROLLER.read_text()
+    assert 'play_cue("stt_start")' in ctrl
+    assert 'play_cue("stt_end")' in ctrl
+    thinking = ctrl.split("async def on_thinking_esphome", 1)[1].split(
+        "\n            async def ", 1)[0]
+    assert 'play_cue("stt_end")' in thinking, \
+        "stt_end must ride on_thinking, the single end-of-speech hook"
+    esp = ESPHOME.read_text()
+    assert "_on_stt_start" in esp, \
+        "the satellite must expose the STT_VAD_START hook the open cue rides"
+    assert "_on_stt_start   = None" in esp, \
+        "_on_stt_start must be cleared at turn end beside _on_thinking"
+
+
 def test_sendspin_is_gated_on_its_capability_and_its_token_stays_private():
     """
     Sendspin (#89) is off on firmware without a player, so the toggle must be

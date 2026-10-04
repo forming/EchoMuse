@@ -1054,6 +1054,19 @@ class Device:
         return "volume_cue" in (self.capabilities or [])
 
     @property
+    def stt_cue_capable(self) -> bool:
+        """
+        Whether this firmware can bracket its speech-to-text window with two
+        tones (#683).
+
+        Separate from wake_cue_capable because the answers are different: one
+        says the Echo heard you, the other says it is listening now and has
+        stopped, and someone with the wake sound off still wants the bracket.
+        The toggle is disabled without it, for wake_cue's reason.
+        """
+        return "stt_cue" in (self.capabilities or [])
+
+    @property
     def oww_trigger_capable(self) -> bool:
         """
         Whether this firmware can ACT on its own wake detection.
@@ -2564,6 +2577,16 @@ async def _run_voice_locked(device: Device, trigger_label: str = "unknown",
                         pass
                 await _leds_turn_end(device)
 
+            async def on_stt_start_esphome():
+                # #683: the Echo plays its own rising pair when the
+                # speech-to-text window opens. Fired from HA's STT_VAD_START
+                # and only there: that is the model's own verdict on speech
+                # beginning, and the device has no equivalent signal.
+                if stop_spin.is_set():
+                    return  # cleanup already ran; turn is over
+                if getattr(device, "stt_sound", False) and device.stt_cue_capable:
+                    await device.play_cue("stt_start")
+
             async def on_thinking_esphome():
                 nonlocal spin_task, watcher
                 if stop_spin.is_set():
@@ -2572,6 +2595,13 @@ async def _run_voice_locked(device: Device, trigger_label: str = "unknown",
                 device.listening = False
                 await _push_device_state(device)
                 log.info(f"[{device.device_id}] Thinking (esphome)")
+                # #683: the falling half of the STT bracket, at the single
+                # hook both end-of-speech routes funnel through (_enter_thinking
+                # — HA's STT_VAD_END and the device VAD sentinel, so #370's
+                # "wire it to only one" does not apply here). Before the
+                # private-listening branch below, which returns.
+                if getattr(device, "stt_sound", False) and device.stt_cue_capable:
+                    await device.play_cue("stt_end")
                 if not device.cancel_event.is_set() and (
                     spin_task is None or spin_task.done()
                 ):
@@ -2738,6 +2768,7 @@ async def _run_voice_locked(device: Device, trigger_label: str = "unknown",
                     should_continue = await esphome.trigger_voice_turn(
                         device=device,
                         on_thinking=on_thinking_esphome,
+                        on_stt_start=on_stt_start_esphome,
                         post_turn_play=post_turn_play_esphome,
                         trigger_label=turn_label,
                         preroll_discard=preroll_discard,
@@ -4325,6 +4356,10 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
         # wake path, mirrored in both places because that is the rule
         # test_config_mirrors.py enforces and the reason it exists.
         device.wake_sound = bool(config.get("wakeSound", False))
+        # #683: decided HERE rather than on the device, because the device
+        # cannot know when its own STT window opens — HA's VAD does. Mirrored
+        # in _apply_live_config; see test_config_mirrors.
+        device.stt_sound = bool(config.get("sttSound", False))
         # Resolved against the capability — see em_shadow.effective_mode for
         # why "on" against firmware that cannot trigger must become shadow
         # rather than being honoured.

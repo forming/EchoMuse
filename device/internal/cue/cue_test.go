@@ -223,20 +223,75 @@ func TestVolumeCueIsASingleDecayingBeep(t *testing.T) {
 	}
 }
 
-// Writes the cue as a WAV for a listening test. Off by default — this is for
-// auditioning a taste parameter, which no assertion can settle.
+// The STT cues (#683) are a bracket, and the DIRECTION is the bracket. The
+// start must rise and the end must fall: the wake cue seconds earlier already
+// rises for "I heard you", so an end cue that rose with it would sound like a
+// third thing meaning the same thing — which is the failure this pair exists to
+// avoid. Both ends must also be the SAME two pitches reversed, or they read as
+// two unrelated noises rather than one gesture out and back.
+func TestSTTCuesBracketByDirection(t *testing.T) {
+	mid := (sttLowHz + sttHighHz) / 2
+	ends := map[string][]float64{
+		"start": STTCueStart(rate, LevelDBFS(LevelMedium)),
+		"end":   STTCueEnd(rate, LevelDBFS(LevelMedium)),
+	}
+	got := map[string][2]float64{}
+	for name, c := range ends {
+		if len(c) == 0 {
+			t.Fatalf("%s cue rendered nothing", name)
+		}
+		if c[0] != 0 || math.Abs(c[len(c)-1]) > 1e-9 {
+			t.Errorf("%s cue must fade from and to zero (first %v, last %v)", name, c[0], c[len(c)-1])
+		}
+		first := dominantHz(c[:len(c)/3], rate)
+		last := dominantHz(c[len(c)*2/3:], rate)
+		got[name] = [2]float64{first, last}
+		t.Logf("%s cue: %.0fHz then %.0fHz (midpoint %.0f)", name, first, last, mid)
+	}
+	if !(got["start"][0] < mid && got["start"][1] > mid) {
+		t.Errorf("start cue does not rise: %.0fHz then %.0fHz about %.0fHz", got["start"][0], got["start"][1], mid)
+	}
+	if !(got["end"][0] > mid && got["end"][1] < mid) {
+		t.Errorf("end cue does not fall: %.0fHz then %.0fHz about %.0fHz", got["end"][0], got["end"][1], mid)
+	}
+	if got["start"][0] != got["end"][1] || got["start"][1] != got["end"][0] {
+		t.Errorf("start %.0f/%.0fHz and end %.0f/%.0fHz are not the same two pitches reversed",
+			got["start"][0], got["start"][1], got["end"][0], got["end"][1])
+	}
+}
+
+// It fires on every turn, so it stays well under the wake cue's length — a cue
+// people turn off is the failure this design is avoiding.
+func TestSTTCueIsShort(t *testing.T) {
+	got := float64(len(STTCueStart(rate, LevelDBFS(LevelMedium)))) / rate * 1000
+	if got >= DurationMS() {
+		t.Errorf("STT cue is %.0fms against the wake cue's %.0fms — too long to fire twice a turn",
+			got, DurationMS())
+	}
+	t.Logf("STT cue %.0fms, wake cue %.0fms", got, DurationMS())
+}
+
+// Writes the cues as WAVs for a listening test. Off by default — this is for
+// auditioning a taste parameter, which no assertion can settle. EM_CUE_WAV is
+// a path PREFIX, because the STT cues can only be judged against the wake cue
+// they follow.
 //
-//	EM_CUE_WAV=/tmp/wake_cue.wav go test ./internal/cue/ -run Audition
+//	EM_CUE_WAV=/tmp/cue- go test ./internal/cue/ -run Audition
 func TestAudition(t *testing.T) {
 	path := os.Getenv("EM_CUE_WAV")
 	if path == "" {
-		t.Skip("set EM_CUE_WAV to render a WAV for listening")
+		t.Skip("set EM_CUE_WAV to a path prefix to render WAVs for listening")
 	}
-	c := WakeCue(rate, LevelDBFS(LevelMedium))
-	if err := writeWAV(path, c, rate); err != nil {
-		t.Fatalf("write %s: %v", path, err)
+	for name, c := range map[string][]float64{
+		"wake":      WakeCue(rate, LevelDBFS(LevelMedium)),
+		"stt-start": STTCueStart(rate, LevelDBFS(LevelMedium)),
+		"stt-end":   STTCueEnd(rate, LevelDBFS(LevelMedium)),
+	} {
+		if err := writeWAV(path+name+".wav", c, rate); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		t.Logf("wrote %s%s.wav (%.0fms, %d samples)", path, name, float64(len(c))/rate*1000, len(c))
 	}
-	t.Logf("wrote %s (%.0fms, %d samples)", path, DurationMS(), len(c))
 }
 
 func writeWAV(path string, samples []float64, fs int) error {

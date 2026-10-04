@@ -124,11 +124,19 @@ prose is recognisable by frequency rather than by any single phrase, so these
 are budgets, not bans — except the third, which is a ban.
 
 **The target is prose that does not read as stock, and authorship is not the
-point.** Claude wrote most of this project and the record says so — commit
-trailers, the `— Team EchoMuse (powered by Claude)` sign-off on every issue
-reply. Nothing here is concealment, so do not write self-consciously to avoid
-sounding like a model; that reads as strangely as the clichés do. Aim at clear.
-A reader's objection is to stock phrasing, never to who typed it.
+point.** Claude wrote most of this project and the record says so — a
+`Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>` trailer on the
+commit (48 of the last 60). Nothing here is concealment, so do not write
+self-consciously to avoid sounding like a model; that reads as strangely as
+the clichés do. Aim at clear. A reader's objection is to stock phrasing,
+never to who typed it.
+
+**Do NOT add a `— Team EchoMuse (powered by Claude)` sign-off.** It was
+believed to be the convention here, and it is not: it appears on no PR body,
+no issue reply and no commit in the repo's history. A 2026-10-04 batch of
+five PRs carried it because this file used to claim otherwise, and it had
+to be stripped from all five afterwards. The trailer above is the form.
+Attribution lives in the commit, not stapled to prose.
 
 - **Say it; don't rate it.** No "this matters", "worth noting", "the most
   interesting part", "the right way". The reader decides what is important.

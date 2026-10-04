@@ -8808,12 +8808,16 @@ function ProvisionWizard({ token, onClose, knownDevices }) {
                     on their own hardware, and the wrong reaction (power
                     cycling) is what makes a recoverable Echo unrecoverable. */}
                 <p style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: 'var(--text2)', lineHeight: 1.7, margin: '10px 0 0' }}>
-                  <strong>If it does not come up, do not keep power cycling it</strong> — that turns a
-                  recoverable Echo into a case-opening job. Instead: unplug it, hold <strong>mute</strong> or{' '}
-                  <strong>+</strong> (<a href="https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/" target="_blank"
-                  rel="noreferrer">which one depends on your amonet version</a>) and plug it back in to
-                  reach TWRP, reconnect here and use <strong>Restore escrowed boot image</strong>. About
-                  ten seconds, and /data is untouched.
+                  <strong>Only two of those need you</strong> — <strong>red, stopped</strong>, or{' '}
+                  <strong>one segment orbiting a full blue ring for more than a minute</strong>.
+                  Anything else means emOS is still starting, so leave it to finish;
+                  power cycling a recoverable Echo is what turns it into a
+                  case-opening job. For either of the two: unplug it, hold{' '}
+                  <strong>mute</strong> or <strong>+</strong> (<a href="https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/" target="_blank"
+                  rel="noreferrer">which one depends on your amonet version</a>) and plug it
+                  back in to reach TWRP, reconnect here and use{' '}
+                  <strong>Restore escrowed boot image</strong>. About ten seconds, and /data
+                  is untouched.
                 </p>
               </div>
             )}

@@ -54,6 +54,10 @@ type Device struct {
 	// reasoning as the LED meter response curve — not something to discover
 	// via a firmware OTA per attempt.
 	DuckDb float64
+	// ResponseLevel is the relative gain for the voice stream: low (0dB),
+	// medium (+6dB), or high (+12dB). The speaker caps it against the device
+	// volume so their combined gain never exceeds unity.
+	ResponseLevel string
 
 	// WakeSound plays a short rising two-tone when the wake word is
 	// recognised (#120). Off by default: it interrupts "<wakeword>, do this".
@@ -209,6 +213,7 @@ func (d *Device) loadDefaults() {
 	d.BargeInThreshold = envFloat("BARGE_IN_THRESHOLD", 0.05)
 	d.WakeWordEnabled = true
 	d.DuckDb = envFloat("DUCK_DB", -18)
+	d.ResponseLevel = normaliseResponseLevel(envStr("RESPONSE_LEVEL", ResponseLevelLow))
 	d.WakeSound = envBool("WAKE_SOUND", false)
 	d.WakeSoundLevel = envStr("WAKE_SOUND_LEVEL", "medium")
 	d.RemoteVolumeArc = envBool("REMOTE_VOLUME_ARC", false)
@@ -280,6 +285,9 @@ func (d *Device) Apply(msg ConfigMessage) {
 	// be distinguishable from an absent field, hence the pointer.
 	if msg.DuckDb != nil {
 		d.DuckDb = *msg.DuckDb
+	}
+	if msg.ResponseLevel != "" {
+		d.ResponseLevel = normaliseResponseLevel(msg.ResponseLevel)
 	}
 	if msg.WakeSound != nil {
 		d.WakeSound = *msg.WakeSound
@@ -378,6 +386,38 @@ func (d *Device) RemoteVolumeArcEnabled() bool {
 	return d.RemoteVolumeArc
 }
 
+const (
+	ResponseLevelLow    = "low"
+	ResponseLevelMedium = "medium"
+	ResponseLevelHigh   = "high"
+)
+
+func normaliseResponseLevel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case ResponseLevelMedium:
+		return ResponseLevelMedium
+	case ResponseLevelHigh:
+		return ResponseLevelHigh
+	default:
+		return ResponseLevelLow
+	}
+}
+
+// ResponseGainDB returns the configured relative voice-stream gain. Unknown
+// values fail safely to today's 0dB behaviour.
+func (d *Device) ResponseGainDB() float64 {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	switch d.ResponseLevel {
+	case ResponseLevelMedium:
+		return 6
+	case ResponseLevelHigh:
+		return 12
+	default:
+		return 0
+	}
+}
+
 // applyOutput merges the output-chain keys. Every one of them has a
 // legitimate zero — a flat band, a 0dBFS threshold, "off" — so each is a
 // pointer (or a slice) and absent means untouched. eqBands shorter than
@@ -460,6 +500,7 @@ func (d *Device) Snapshot() ConfigMessage {
 		OwwOnDevice:         d.OwwOnDevice,
 		BargeInEnabled:      &bargeInEnabled,
 		BargeInThreshold:    d.BargeInThreshold,
+		ResponseLevel:       d.ResponseLevel,
 		WakeWordEnabled:     &wakeWordEnabled,
 		StartupVolume:       d.StartupVolume,
 		VolumeButtonSound:   &volumeButtonSound,
@@ -532,6 +573,7 @@ type ConfigMessage struct {
 	WakeWordEnabled     *bool    `json:"wakeWordEnabled,omitempty"`
 	BargeInThreshold    float64  `json:"bargeInThreshold,omitempty"`
 	DuckDb              *float64 `json:"duckDb,omitempty"`
+	ResponseLevel       string   `json:"responseLevel,omitempty"`
 	BeamAngle           *float64 `json:"beamAngle,omitempty"`
 	BeamformingEnabled  *bool    `json:"beamformingEnabled,omitempty"`
 	HasBeamforming      bool     `json:"hasBeamforming,omitempty"`

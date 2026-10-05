@@ -660,7 +660,7 @@ function ControllerEndpointsField({ value, onChange, readOnly = false }) {
 // VISIBLE and disabled: the capability rule is that a device lacking a feature
 // shows the control with the reason, and a native select would hide the option
 // entirely, which reads as the feature not existing at all.
-function Select({ label, sub, value, options, onChange }) {
+function Select({ label, sub, value, options, onChange, disabled = false }) {
   return (
     <div style={{ marginBottom: 20, minWidth: 0 }}>
       <div style={{ marginBottom: 7, minWidth: 0 }}>
@@ -673,9 +673,9 @@ function Select({ label, sub, value, options, onChange }) {
             key={o.value}
             role="radio" aria-checked={o.value === value}
             className={'em-pill em-pill--small' + (o.value === value ? ' em-pill--accent' : '')}
-            disabled={!!o.disabled}
+            disabled={disabled || !!o.disabled}
             style={{ flex: 1, minWidth: 0 }}
-            onClick={() => { if (!o.disabled) onChange(o.value); }}>
+            onClick={() => { if (!(disabled || o.disabled)) onChange(o.value); }}>
             {o.label}
           </button>
         ))}
@@ -2457,6 +2457,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
                 wakeCueCapable={!device.connected || !!device.wakeCueCapable}
                 volumeCueCapable={!device.connected || !!device.volumeCueCapable}
                 remoteVolumeArcCapable={!device.connected || !!device.remoteVolumeArcCapable}
+                responseLevelCapable={!device.connected || !!device.responseLevelCapable}
                 sendspinCapable={!device.connected || !!device.sendspinCapable}
                 sendspinPanel={device.connected && device.sendspinCapable
                   ? <SendspinPairing deviceId={device.device_id} status={device.sendspin} isAdmin={isAdmin}/>
@@ -9223,7 +9224,7 @@ const STAGE_MONO = "'DM Mono',monospace";
 // control sitting under a toggle that does not govern it would look fine and
 // be silently wrong.
 const CONFIG_SECTIONS = {
-  "playback": ["eqBands", "eqLoudness", "duckDb", "limiterEnabled", "limiterThreshold", "limiterRelease", "bassGuardEnabled", "bassGuardDb", "streamReply", "volumeButtonSound"],
+  "playback": ["eqBands", "eqLoudness", "duckDb", "responseLevel", "limiterEnabled", "limiterThreshold", "limiterRelease", "bassGuardEnabled", "bassGuardDb", "streamReply", "volumeButtonSound"],
   "wakeword": ["owwModel", "owwThreshold", "owwSpeexNs", "bargeInEnabled", "bargeInThreshold", "wakeArbitrationMs", "owwOnDevice", "wakeSound", "wakeSoundLevel", "wakeClipCapture", "wakeClipMinScore"],
   "microphones": ["adcMicpga", "adcDigitalGain", "micGainDb", "beamformingEnabled", "beamAngle", "aecEnabled", "aecDelayMs", "aecTailMs", "aecRefSource", "nsAsr", "saveUtterances"],
   "ring": ["ledScene", "ledListenColor", "ledThinkColor", "remoteVolumeArc", "meterAttack", "meterDecay", "meterFloor", "meterGamma", "meterRef", "meterCurve"],
@@ -9390,6 +9391,7 @@ function DeviceConfigForm({ config, onChange, disabled, sections, onScopeChange,
                             emosFleet = true, wakeCueCapable = true,
                             volumeCueCapable = true,
                             remoteVolumeArcCapable = true,
+                            responseLevelCapable = true,
                             sendspinCapable = true, sendspinPanel = null,
                             bleConnectCapable = true, blePanel = null }) {
   // emosFleet defaults TRUE for the same reason the capability props above do,
@@ -9618,6 +9620,20 @@ function DeviceConfigForm({ config, onChange, disabled, sections, onScopeChange,
               <Toggle label="Speak while the reply is written"
                 sub="faster with a quick model; a slow one may pause"
                 value={config.streamReply ?? false} onChange={v => set('streamReply', v)}/>
+            </div>
+            <div style={{ marginTop: 8, ...inputStyle }}>
+              <Select label="Response level"
+                sub={responseLevelCapable
+                  ? "voice responses relative to device volume; boost tapers near maximum"
+                  : "needs newer firmware on this Echo"}
+                disabled={!responseLevelCapable}
+                value={config.responseLevel ?? 'low'}
+                options={[
+                  { value: 'low', label: 'Low (normal)' },
+                  { value: 'medium', label: 'Medium (+6 dB)' },
+                  { value: 'high', label: 'High (+12 dB)' },
+                ]}
+                onChange={v => set('responseLevel', v)}/>
             </div>
             {/* Speaker protection: ONE toggle for the bass guard, and the
                 limiter is not offered at all.

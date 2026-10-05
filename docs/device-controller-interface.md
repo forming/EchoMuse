@@ -117,6 +117,7 @@ below (`capabilities()` in `control.go`):
 | `wake_cue` | always | Can generate its own wake sound, at `wakeSoundLevel`, independent of volume. Plays it when `wakeSound` is on and a wake has WON: on `listen_ack` for a private-listening session, or on `play_cue` otherwise — never at the crossing, so a ceded wake is silent |
 | `volume_cue` | always | Can generate a `volumeButtonSound` preview at the newly selected level after a physical-button change, or repeat it for another Volume Up press at maximum; only while voice and music are idle |
 | `remote_volume_arc` | always | Can show the cyan level arc for changed, non-zero remote volume commands when the opt-in `remoteVolumeArc` setting is on. Physical buttons remain unconditional; mute, boot restore, and duplicate state syncs remain silent |
+| `response_level` | always | Can boost the voice plane relative to device volume with `responseLevel` (`low` / `medium` / `high` = 0 / +6 / +12dB). The boost is applied before voice/music mixing and capped so it plus device volume never exceeds unity |
 | `ambient_light` | only if the sensor is actually readable (`als.Present()`) | Reports light readings |
 | `sendspin` | always | Can be a Sendspin player (#89) for synchronised multi-room audio from Music Assistant, run when `sendspinEnabled` is on. Music Assistant connects to the device directly (port 8928, advertised as `_sendspin._tcp`); nothing of the session crosses the controller. Whether it is running, connected or paired is the `sendspin` status |
 | `wake_word_off` | always | Honours `wakeWordEnabled: false` (Home Assistant's "No wake word"): a wake crossing is reported as a shadow cross and opens no session and no turn. The button still works. Without it the controller declines "No wake word" for an Echo in `listen_state` `local` |
@@ -383,7 +384,7 @@ eqBands, eqLoudness, limiterEnabled, limiterThreshold, limiterRelease,
 bassGuardEnabled, bassGuardDb,
 ledScene, ledListenColor, ledThinkColor,
 meterAttack, meterDecay, meterFloor, meterGamma, meterRef, meterCurve,
-wakeArbitrationMs, duckDb,
+wakeArbitrationMs, duckDb, responseLevel,
 buttonSingleTapEvent, buttonMultiTapMs,
 owwOnDevice, saveUtterances, streamReply,
 wakeSound, wakeSoundLevel, volumeButtonSound

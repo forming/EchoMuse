@@ -1095,6 +1095,11 @@ class Device:
         return "remote_volume_arc" in (self.capabilities or [])
 
     @property
+    def response_level_capable(self) -> bool:
+        """Whether firmware can apply the relative voice-response gain."""
+        return "response_level" in (self.capabilities or [])
+
+    @property
     def oww_trigger_capable(self) -> bool:
         """
         Whether this firmware can ACT on its own wake detection.

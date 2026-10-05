@@ -2239,6 +2239,14 @@ static void svc_add(const char *name, char *const *argv, const char *req,
                     const char *after);
 static void supervise(void);
 
+/* #560: service control. Defined with the supervision machinery (they need the
+ * table and the backoff), called from the tool path above and from main()'s
+ * boot sequence, both of which come first in this file. */
+#define SVC_FIFO "/run/emos-svc"
+static int  svc_tool_main(int argc, char **argv);
+static void svc_poll(void);
+static int  svc_backoff(int fails);
+
 /* Run as anything other than PID 1, this binary is a small tool instead of an
  * init. It is the obvious place for the reboot: it is already static, already
  * in the ramdisk at a known path, and already owns the syscall — so a person
@@ -2251,9 +2259,36 @@ static void supervise(void);
  * take the tool path and never boot — a brick produced by an argument nobody
  * typed. PID 1 is what "am I the init" actually means.
  */
+/*
+ * The boot modes `/init <word>` is allowed to reboot into. #560: this used to
+ * reboot into whatever word it was given, so `/init stop echomuse` rebooted the
+ * device. A word that is not on this list is refused rather than passed to
+ * reboot_into, because a typo here should not reboot somebody's Echo.
+ */
+static const char *const boot_modes[] = { "recovery", "emos" };
+
+static int is_boot_mode(const char *word)
+{
+    for (size_t i = 0; i < sizeof(boot_modes) / sizeof(boot_modes[0]); i++)
+        if (!strcmp(word, boot_modes[i]))
+            return 1;
+    return 0;
+}
+
 static int tool_main(int argc, char **argv)
 {
-    const char *mode = (argc > 1) ? argv[1] : "recovery";
+    /* #560: dispatch on the INVOKED NAME, not on argv[1].
+     *
+     * `emos-svc` is a symlink to /init that only a NEW image creates, so a
+     * device still running an older build answers "not found" rather than
+     * reaching the boot-mode path below — where `emos-svc stop` would reboot
+     * it. The name is the discriminator precisely because the file is the same.
+     */
+    const char *base = strrchr(argv[0] ? argv[0] : "", '/');
+    base = base ? base + 1 : (argv[0] ? argv[0] : "init");
+
+    if (!strcmp(base, "emos-svc"))
+        return svc_tool_main(argc, argv);
 
     if (argc > 1 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
         dprintf(1, "usage: %s [mode]    (default: recovery)\n"
@@ -2262,11 +2297,23 @@ static int tool_main(int argc, char **argv)
         return 0;
     }
 
-    dprintf(1, "rebooting into \"%s\"...\n", mode);
-    reboot_into(mode);
-    dprintf(2, "the kernel refused the boot mode \"%s\": %s\n",
-            mode, strerror(errno));
-    return 1;
+    {
+        const char *mode = (argc > 1) ? argv[1] : "recovery";
+        if (!is_boot_mode(mode)) {
+            dprintf(2, "\"%s\" is not a boot mode this build knows; refusing "
+                       "rather than rebooting into it\n", mode);
+            dprintf(2, "known: ");
+            for (size_t i = 0; i < sizeof(boot_modes) / sizeof(boot_modes[0]); i++)
+                dprintf(2, "%s ", boot_modes[i]);
+            dprintf(2, "\n");
+            return 1;
+        }
+        dprintf(1, "rebooting into \"%s\"...\n", mode);
+        reboot_into(mode);
+        dprintf(2, "the kernel refused the boot mode \"%s\": %s\n",
+                mode, strerror(errno));
+        return 1;
+    }
 }
 
 int main(int argc, char **argv)
@@ -2506,6 +2553,12 @@ int main(int argc, char **argv)
     mkdir("/tmp", 01777);          /* rootfs is a ramdisk: RAM-backed, as on stock */
     mkdir("/run", 0755);
     mount("tmpfs", "/run", "tmpfs", 0, "size=4m");
+
+    /* #560: the service-control FIFO. Created here rather than on first use so
+     * the tool never has to, and so its 0600 mode is ours rather than whatever
+     * umask the caller happens to have. A FIFO in tmpfs is gone at reboot,
+     * which is the same non-persistence the holds themselves have. */
+    mkfifo(SVC_FIFO, 0600);
 
     mkdir("/data/emos", 0755);
 
@@ -2763,13 +2816,222 @@ struct svc {
     time_t       started;
     int          fails;  /* consecutive fast exits */
     int          gone;   /* logged as not-installed; stop trying */
+    /* #560: set by `emos-svc stop`, cleared by `start`. A held service is
+     * neither respawned nor counted as failing, and the hold is NOT persisted
+     * — a reboot brings everything back, which is deliberate. A persistent
+     * disable on a device with no adb is too easy to leave as a brick. */
+    int          held;
 };
 static struct svc svcs[MAX_SVC];
 static int nsvc;
 
 static volatile sig_atomic_t want_shutdown;
 
+/* ─── Service control (#560) ────────────────────────────────────────────────
+ *
+ * `emos-svc stop|start|restart|status [name]`, the same static binary run as
+ * a tool (getpid() != 1) writing one line to a FIFO that PID 1 reads. Before
+ * this, the only way to take a service down for maintenance was to pause the
+ * supervisor with `kill -STOP` — which is what the #557 bench test had to do.
+ *
+ * Requests are handled by the supervisor loop rather than by a fork of the
+ * tool, because the tool is a different process and the service table is
+ * PID 1's. The tool writes and exits; the state change happens where the
+ * state is.
+ */
+
+/* What a request asks for. Parsed here, applied by svc_apply. */
+enum svc_op { SVC_OP_NONE, SVC_OP_STOP, SVC_OP_START, SVC_OP_RESTART,
+              SVC_OP_STATUS };
+
+struct svc_req {
+    enum svc_op op;
+    char name[32];   /* empty = every service */
+};
+
+/*
+ * Parse one request line. Pure, so svccheck can drive it.
+ *
+ * An unrecognised verb is NONE rather than a guess: this reaches init through
+ * a FIFO anybody with a shell can write to, and acting on a word we did not
+ * understand is how a typo becomes a stopped Echo. A name that matches no
+ * service is likewise refused here rather than silently matching nothing.
+ */
+static int svc_parse(const char *line, struct svc_req *out)
+{
+    char verb[16] = {0};
+    char name[32] = {0};
+    int fields;
+
+    out->op = SVC_OP_NONE;
+    out->name[0] = '\0';
+    if (!line)
+        return -1;
+
+    /* Trailing newline off; the tool writes one line. */
+    fields = sscanf(line, "%15s %31s", verb, name);
+    if (fields < 1)
+        return -1;
+
+    if      (!strcmp(verb, "stop"))     out->op = SVC_OP_STOP;
+    else if (!strcmp(verb, "start"))    out->op = SVC_OP_START;
+    else if (!strcmp(verb, "restart"))  out->op = SVC_OP_RESTART;
+    else if (!strcmp(verb, "status"))   out->op = SVC_OP_STATUS;
+    else return -1;
+
+    if (fields == 2) {
+        for (int i = 0; i < nsvc; i++)
+            if (!strcmp(svcs[i].name, name)) {
+                snprintf(out->name, sizeof(out->name), "%s", name);
+                return 0;
+            }
+        return -1;   /* a name that matches nothing is a mistake, not "all" */
+    }
+    return 0;        /* no name: every service */
+}
+
+/* Which services a request covers. `matches` is the name, "" for all. */
+static int svc_selected(const struct svc *s, const struct svc_req *r)
+{
+    return r->name[0] == '\0' || !strcmp(s->name, r->name);
+}
+
+/*
+ * Apply a parsed request to the table. Pure with respect to process state —
+ * it sets `held` and, for stop, the pid to be signalled — so svccheck can
+ * drive it without killing anything. Returns how many services it touched.
+ */
+static int svc_apply(const struct svc_req *r)
+{
+    int touched = 0;
+    for (int i = 0; i < nsvc; i++) {
+        struct svc *s = &svcs[i];
+        if (!svc_selected(s, r))
+            continue;
+        touched++;
+        switch (r->op) {
+        case SVC_OP_STOP:
+        case SVC_OP_RESTART:
+            /* SIGTERM, not SIGKILL: start_server.sh has a graceful shutdown
+             * that puts the amp off, and a kill would leave the speaker
+             * driven. The pid is cleared here rather than waiting for the
+             * reaper so the state reads as "stopping" rather than "running". */
+            s->held = 1;
+            if (s->pid > 0) {
+                kill(s->pid, SIGTERM);
+                s->pid = -1;
+            }
+            break;
+        case SVC_OP_START:
+            /* Clear the hold AND the fast-exit count, or a service stopped
+             * during a crash loop restarts into the same backoff. */
+            s->held = 0;
+            s->fails = 0;
+            s->started = 0;
+            break;
+        default:
+            break;
+        }
+    }
+    return touched;
+}
+
+static void svc_print_status(void)
+{
+    for (int i = 0; i < nsvc; i++) {
+        const struct svc *s = &svcs[i];
+        const char *state = s->gone ? "absent"
+                        : s->held ? (s->pid > 0 ? "held (stopping)" : "held")
+                        : s->pid > 0 ? "running"
+                        : "waiting";
+        /* pid, state, restart count and backoff — what "is this thing working"
+         * needs, and none of it is a path or a filename. */
+        dprintf(1, "%-10s %-15s pid=%-6ld fails=%d next_in=%lds\n",
+                s->name, state, (long)(s->pid > 0 ? s->pid : 0),
+                s->fails, (long)(s->held ? 0 : svc_backoff(s->fails)));
+    }
+}
+
+/* Read whatever is queued on the FIFO and apply it. Non-blocking: the
+ * supervisor loop calls this once a second and must not stall on it. */
+static void svc_poll(void)
+{
+    int fd;
+    char line[128];
+
+    fd = open(SVC_FIFO, O_RDONLY | O_NONBLOCK);
+    if (fd < 0)
+        return;
+    while (read(fd, line, sizeof(line) - 1) > 0) {
+        struct svc_req r;
+        line[sizeof(line) - 1] = '\0';
+        /* read() gave us however much arrived; take the first line of it. */
+        line[strcspn(line, "\n")] = '\0';
+        if (svc_parse(line, &r) < 0) {
+            dprintf(2, "svc: refusing request \"%s\"\n", line);
+            continue;
+        }
+        if (r.op == SVC_OP_STATUS) {
+            svc_print_status();
+            continue;
+        }
+        if (!svc_apply(&r))
+            dprintf(2, "svc: %s matched nothing\n", line);
+    }
+    close(fd);
+}
+
 static void on_term(int sig) { (void)sig; want_shutdown = 1; }
+
+/*
+ * The tool half: write one request line to the FIFO and exit.
+ *
+ * The tool does not apply anything itself — the service table belongs to PID 1
+ * and this is a different process. It also does not print the status: status
+ * is read by whoever asked, over the same FIFO, by init itself.
+ */
+static int svc_tool_main(int argc, char **argv)
+{
+    int fd;
+    ssize_t n;
+    char line[80];
+
+    if (argc < 2) {
+        dprintf(2, "usage: %s stop|start|restart|status [name]\n", argv[0]);
+        return 2;
+    }
+    if (argc > 3) {
+        dprintf(2, "usage: %s stop|start|restart|status [name]\n", argv[0]);
+        return 2;
+    }
+
+    if (argc == 3)
+        n = snprintf(line, sizeof(line), "%s %s\n", argv[1], argv[2]);
+    else
+        n = snprintf(line, sizeof(line), "%s\n", argv[1]);
+
+    /* Create the FIFO if init has not yet. mkfifo on an existing path fails,
+     * which is fine — init makes it at boot. */
+    if (access(SVC_FIFO, F_OK) != 0)
+        mkfifo(SVC_FIFO, 0600);
+
+    /* O_WRONLY blocks until a reader opens it, which is init's poll. If init
+     * is not running there is no supervisor to act on this, and blocking here
+     * would hang the caller forever. */
+    fd = open(SVC_FIFO, O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        dprintf(2, "no supervisor listening on %s (%s) — is init running?\n",
+                SVC_FIFO, strerror(errno));
+        return 1;
+    }
+    if (write(fd, line, (size_t)n) != n) {
+        dprintf(2, "could not hand the request to init: %s\n", strerror(errno));
+        close(fd);
+        return 1;
+    }
+    close(fd);
+    return 0;
+}
 
 static void svc_add(const char *name, char *const *argv, const char *req,
                     const char *after)
@@ -2797,6 +3059,33 @@ static int svc_backoff(int fails)
         return 2;
     int b = 2 << (fails - 1);
     return b > 60 ? 60 : b;
+}
+
+/*
+ * Whether the supervisor should launch this service now (#560).
+ *
+ * Split out of supervise() so svccheck can drive it. The test is only worth
+ * anything if it asks the same question the loop does — a check that
+ * re-states the condition in its own words passes when the condition is
+ * removed from the loop, which is the failure it exists to catch: a held
+ * service relaunched, a stop the tool reported as applied and nothing took.
+ *
+ * The `req`/`after` checks stay in the loop, because they touch the
+ * filesystem and the two have different shapes: a missing `req` is permanent
+ * and marks the service gone, a missing `after` is temporary and is retried.
+ */
+static int svc_should_start(const struct svc *s, time_t now)
+{
+    if (s->pid > 0 || s->gone)
+        return 0;
+    /* A held service is not a failed one, and is not ours to run until
+     * `emos-svc start` clears the hold. Checked before the backoff so a stop
+     * cannot be read as a fast exit either. */
+    if (s->held)
+        return 0;
+    if (now - s->started < svc_backoff(s->fails))
+        return 0;
+    return 1;
 }
 
 /* The console is the one service that needs a controlling terminal, and it
@@ -3351,6 +3640,11 @@ static void supervise(void)
         if (want_shutdown)
             do_shutdown();
 
+        /* #560: a service request, if one is queued. Before the respawn scan,
+         * so a stop is in force by the time we get to looking for something
+         * to start. */
+        svc_poll();
+
         if (trial_armed && mono_ms() > TRIAL_SECS * 1000L) {
             trial_armed = 0;
             if (trial_pending()) {
@@ -3378,9 +3672,7 @@ static void supervise(void)
         time_t now = time(NULL);
         for (int i = 0; i < nsvc; i++) {
             struct svc *s = &svcs[i];
-            if (s->pid > 0 || s->gone)
-                continue;
-            if (now - s->started < svc_backoff(s->fails))
+            if (!svc_should_start(s, now))
                 continue;
             /* Ordering, not just presence: a service with `after` waits for
              * it and keeps waiting, where a missing `req` means give up. */

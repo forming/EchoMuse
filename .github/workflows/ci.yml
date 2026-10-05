@@ -614,6 +614,15 @@ jobs:
         run: |
           cc -O2 -o /tmp/trialcheck emos/init/trialcheck.c
           /tmp/trialcheck
+      # `emos-svc stop` on a service the supervisor then quietly respawns is
+      # the same class of failure: the tool reports success, nothing changes,
+      # and nothing on the device says so. It also checks the trap that made
+      # `/init <word>` a reboot -- a word is only a boot mode if it is on the
+      # list, so `emos-svc stop` cannot reach it.
+      - name: A held service stays held, and only a known word reboots
+        run: |
+          cc -O2 -Wall -o /tmp/svccheck emos/init/svccheck.c
+          /tmp/svccheck
       # em-wifi decides from wpa_supplicant's scan flags which networks it
       # offers. Tested SAE before PSK, it refused every WPA2/WPA3 transition-
       # mode network as WPA3 -- the default on current routers -- and sent

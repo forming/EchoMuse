@@ -671,6 +671,24 @@ reparent to init and nobody else collects them), respawns with backoff, and on
 - EchoMuse is started through `start_server.sh`, not directly, because that
   script owns the A/B slot symlink and fast-exit backoff the OTA system depends
   on. Starting the binary would silently bypass firmware rollback.
+- `emos-svc stop|start|restart|status [name]` holds a service, or clears the
+  hold. The request goes to PID 1 over a `0600` FIFO in `/run`; the tool writes
+  one line and exits, because the service table belongs to init. `stop` sends
+  `SIGTERM` rather than `SIGKILL` so `start_server.sh` still runs its graceful
+  shutdown and puts the amp off, and it is not counted as a fast exit, so a
+  `start` straight afterwards does not resume into a backoff the stop created.
+  A name is required to match a service exactly — one that matches nothing is
+  refused rather than treated as "all", because a typo that stops the Echo is
+  worse than one that does nothing.
+- **Holds are not persisted.** A reboot brings every service back. A permanent
+  disable on a device with no working adb is too easy to leave as a brick, and
+  the maintenance window it would serve has ended by then anyway.
+- The verbs are reached through a symlink to `/init`, and dispatch is on the
+  **invoked name**, so a device still running an older image answers "not
+  found" rather than acting on a word it does not know. `/init <word>` itself
+  now reboots only into a mode on its list — before this it rebooted into
+  whatever it was given, which is what made `emos-svc stop` a reboot on the
+  first attempt at it.
 
 ## Logs, crashes and storage
 

@@ -154,6 +154,12 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 HOME_URL="https://github.com/wilbowes/EchoMuse"
 OSREL
 install -m 0755 "$WORK/init" "$WORK/root/init"
+# #560: `emos-svc` is the same binary reached under another name, and init
+# dispatches on argv[0] rather than on argv[1]. The symlink is created by the
+# BUILD, not by init, so a device still running an older image has no
+# emos-svc at all and answers "not found" -- rather than the older init
+# reading "stop" as a boot mode and rebooting the Echo.
+ln -sf init "$WORK/root/emos-svc"
 ( cd "$WORK/root" && find . | cpio -o -H newc 2>/dev/null | gzip -9 ) > "$WORK/ramdisk.gz"
 
 # LK gunzips an AArch64 Image, so the kernel must go back in COMPRESSED — the

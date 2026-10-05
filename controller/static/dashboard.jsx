@@ -2061,7 +2061,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
                   const ip = device.ip && device.ip !== '127.0.0.1' ? device.ip : null;
                   const ipStr = device.connected ? (ip || '—') : (ip ? `${ip} (last seen)` : '—');
                   const os = [_osLabel(device), _kernelLabel(device)].filter(Boolean).join(' · ');
-                  return <>{ipStr} · {device.device_id} · {_middleEllipsis(device.firmware_ver, 24, 7) || 'unknown'}{os && ` · ${os}`}</>;
+                  return <>{ipStr} · {device.device_id} · {_middleEllipsis(_firmwareLabel(device.firmware_ver), 32, 7) || 'unknown'}{os && ` · ${os}`}</>;
                 })()}
                 {needsUpdate && <span style={{ color: 'var(--warn)', marginLeft: 10 }}>Update available</span>}
               </div>
@@ -2196,7 +2196,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
                       const ip = device.ip && device.ip !== '127.0.0.1' ? device.ip : null;
                       return device.connected ? (ip || '—') : (ip ? `${ip} (last seen)` : '—');
                     })())}
-                    {row('Firmware', device.firmware_ver || '—')}
+                    {row('Firmware', _firmwareLabel(device.firmware_ver) || '—')}
                     {row('WiFi network', s?.wifiSsid || '—')}
                     {/* Was a bare port number, which answered "which port" and
                         never the question anyone opens this panel with — is
@@ -2509,7 +2509,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
               <Panel label="Firmware">
                 <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16, flexWrap:'wrap' }}>
                   <div style={{ display:'flex', gap:16, alignItems:'flex-end', flexWrap:'wrap', minWidth:0 }}>
-                    <Lcd label="On device"  value={device.firmware_ver || '—'} maxChars={16} color={needsUpdate ? 'var(--lcd-amber)' : 'var(--lcd-green)'}/>
+                    <Lcd label="On device"  value={_firmwareLabel(device.firmware_ver) || '—'} maxChars={30} color={needsUpdate ? 'var(--lcd-amber)' : 'var(--lcd-green)'}/>
                     <Lcd label="Available"  value={release?.version || '—'} maxChars={16} color="var(--lcd-dim)"/>
                     {device.firmware_previous && (
                       <Lcd label="Rollback slot" value={device.firmware_previous} maxChars={16} color="var(--lcd-dim)"/>
@@ -2932,7 +2932,7 @@ function Card({ device, onClick }) {
               {/* The tile is narrow: "emOS (64-bit)", and nothing extra for
                   FireOS. The OS never shrinks; the firmware version gives way
                   to it, since the tooltip and the header both carry it whole. */}
-              {device.firmware_ver && <span style={{ ..._ROW_TEXT, flex: '0 1 auto' }}>{_middleEllipsis(device.firmware_ver, 24, 7)}</span>}
+              {device.firmware_ver && <span style={{ ..._ROW_TEXT, flex: '0 1 auto' }}>{_middleEllipsis(_firmwareLabel(device.firmware_ver), 32, 7)}</span>}
               {_osLabel(device) && <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{device.firmware_ver ? '\u00a0· ' : ''}{_osLabel(device)}</span>}
             </div>
           )}
@@ -3343,6 +3343,26 @@ function _kernelLabel(d) {
 }
 function _kernelTitle(d) {
   return d.kernelArch ? `kernel ${d.kernelArch} ${d.kernelRelease || ''}`.trim() : null;
+}
+
+// What the firmware value IS, stated where it is shown (#357).
+//
+// `firmware_ver` is written when a device REGISTERS, not when an update
+// completes — deliberately, because the register message is the only place the
+// controller can learn what a device is actually running. So between an OTA
+// finishing and the device reconnecting, this panel reports the version the
+// device is about to leave behind, with nothing to say so. The value is
+// right; the framing was not.
+//
+// The qualifier names a CONNECT, not a time, and that is the whole rule.
+// `touch_device_seen` refreshes `last_seen` on every stats tick, so a
+// relative time would be wrong for every connected device and right only for
+// one that is offline — which is the opposite of the reassurance a timestamp
+// looks like it gives. A connect is a fact about the value that is always
+// true of it.
+const FW_QUALIFIER = 'at last connect';
+function _firmwareLabel(ver) {
+  return ver ? `${ver} (${FW_QUALIFIER})` : null;
 }
 
 // What deleting a device leaves behind in Home Assistant (#375). The identity

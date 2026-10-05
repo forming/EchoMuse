@@ -179,6 +179,104 @@ def test_on_is_never_declined():
     assert not em_wakeword.decline_off(want=True, listening_locally=True, device_can=False)
 
 
+# ── A stored "No wake word" on firmware that cannot honour it (#776) ─────────
+#
+# decline_off covers a request arriving NOW. A choice already in the database
+# was never revisited, so a rollback or a downgrade left the Echo opening a
+# session on every wake while Home Assistant read "No wake word" throughout.
+# These must be the same rule, and these cases are the only real guard: the
+# source-reading tests elsewhere in this file cannot see whether the stored
+# value and the reported value are moved together.
+
+def test_a_stored_off_is_given_up_on_firmware_that_would_still_send():
+    assert em_wakeword.stored_off_unsupported(
+        stored=True, listening_locally=True, device_can=False)
+
+
+def test_a_stored_off_is_kept_where_the_device_stops_at_the_crossing():
+    assert not em_wakeword.stored_off_unsupported(
+        stored=True, listening_locally=True, device_can=True)
+
+
+def test_a_stored_off_is_kept_for_an_echo_streaming_to_the_controller():
+    """The controller stops that stream itself, so this Echo IS honouring off.
+    Reverting it would be a regression, not a fix."""
+    assert not em_wakeword.stored_off_unsupported(
+        stored=True, listening_locally=False, device_can=False)
+
+
+def test_nothing_to_give_up_when_the_wake_word_is_already_on():
+    assert not em_wakeword.stored_off_unsupported(
+        stored=False, listening_locally=True, device_can=False)
+
+
+def test_the_stored_rule_is_the_decline_rule_mirrored():
+    """One rule, two callers: if these ever disagree, one path leaves an Echo
+    claiming silence it is not keeping — which is the bug.
+
+    They are NOT the same predicate and the test should not pretend they are.
+    `decline_off` asks whether a request to go off was refused; it says True
+    whatever is currently stored, because nothing is stored yet at that point.
+    `stored_off_unsupported` asks whether a stored off has to be given up, so
+    it needs the stored value too. What must hold is the part they share: for
+    an Echo that is privately listening on firmware that cannot stop at the
+    crossing, the answer is yes in both, and turning the wake word back on is
+    never refused by either."""
+    for local, can, would_decline in [
+        (True, False, True),    # privately listening, cannot stop at the crossing
+        (True, True, False),    # can honour it
+        (False, False, False),  # controller-scores, so mic_stop is enough
+        (False, True, False),
+    ]:
+        assert em_wakeword.decline_off(
+            want=False, listening_locally=local, device_can=can) is would_decline
+        # An existing stored off is given up exactly when a fresh one would be
+        # declined — that is the mirror, and it is the whole of it.
+        assert em_wakeword.stored_off_unsupported(
+            stored=True, listening_locally=local, device_can=can) is would_decline
+        # Nothing stored, nothing to give up.
+        assert em_wakeword.stored_off_unsupported(
+            stored=False, listening_locally=local, device_can=can) is False
+        # Turning it back on is never refused.
+        assert em_wakeword.decline_off(
+            want=True, listening_locally=local, device_can=can) is False
+
+
+def test_the_stored_rule_runs_where_the_device_reports_listening():
+    """On the listen_state report, not at registration: syncListenState is sent
+    after the ack, so at connect time listen_reported is still None and a check
+    there reads "not private" for a private Echo."""
+    tree = ast.parse((CONTROLLER / "em_controller.py").read_text())
+    handler = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.AsyncFunctionDef) and n.name == "handle_control")
+
+    # Find the branch that handles listen_state, and ask whether the rule is
+    # reached inside it. Walking the tree rather than searching text: this
+    # function is 1000+ lines and its formatting is not a contract.
+    branch = None
+    for node in ast.walk(handler):
+        if not isinstance(node, ast.If):
+            continue
+        test = ast.unparse(node.test)
+        if "listen_state" in test and "msg_type" in test:
+            branch = node
+            break
+    assert branch is not None, "no listen_state branch in handle_control"
+
+    assert any("stored_off_unsupported" in ast.unparse(n)
+               for n in ast.walk(branch)), (
+        "the stored-off rule must be reached from the listen_state branch, "
+        "which is where the device says what it is doing with its microphone"
+    )
+    # Both halves have to move, or the picker and the next restart disagree.
+    dumped = ast.unparse(branch)
+    for needed in ("set_wake_word_enabled", "update_wake_word"):
+        assert needed in dumped, (
+            f"{needed} is missing — a stored value left unsynced reads as 'on' "
+            "in the picker and 'off' again after the next restart"
+        )
+
+
 # ── The same on either side of the wake word split ──────────────────────────
 #
 # "On this Echo" and "On the controller" must behave the same with the wake

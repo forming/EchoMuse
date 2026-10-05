@@ -5321,6 +5321,38 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
                             if after.state == em_listen.STATE_DEGRADED:
                                 em_dbwriter.submit(db.log_device, device_id, "warning", "device",
                                               f"Wake word unavailable, button only: {after.reason}")
+                        # #776: a wake word stored OFF, on firmware that
+                        # cannot stop at the crossing, opens a session on every
+                        # wake that the controller then closes — while Home
+                        # Assistant reads "No wake word" throughout. Give the
+                        # stored state back up, which is what a declined
+                        # request does today.
+                        #
+                        # Here and not on connect: syncListenState is sent
+                        # AFTER the ack, so at registration listen_reported is
+                        # still None and a check there would read "not private"
+                        # for a private Echo — the same bug in a new place.
+                        if em_wakeword.stored_off_unsupported(
+                                stored=not device.wake_word_enabled,
+                                listening_locally=after.state == em_listen.STATE_LOCAL,
+                                device_can=device.wake_word_off_capable):
+                            device.wake_word_enabled = True
+                            esphome.update_wake_word(device_id, True)
+                            em_dbwriter.submit(db.set_wake_word_enabled,
+                                               device_id, True)
+                            em_dbwriter.submit(db.log_device, device_id, "info",
+                                               "controller",
+                                               "Stored wake word off given up: "
+                                               "this firmware still sends audio "
+                                               "on each wake")
+                            log.info(f"[{device_id}] Stored wake word off given "
+                                     f"up — this firmware would still send audio "
+                                     f"on each wake")
+                            await api._push_event({
+                                "type":      "device_update",
+                                "device_id": device_id,
+                                "state":     {"wake_word_enabled": True},
+                            })
                         await _push_device_state(device)
 
                     elif msg_type == "listen_end":

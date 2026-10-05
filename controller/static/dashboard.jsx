@@ -1587,6 +1587,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
   const [deleting, setDeleting] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [debloating, setDebloating] = useState(false);
+  const [wifiRecovering, setWifiRecovering] = useState(false);
   const [assets, setAssets] = useState(null);
   const [installing, setInstalling] = useState(false);
   // Wake word asset install progress: bytes confirmed sent, the file in
@@ -1722,6 +1723,27 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
             + 'watch the device log for details.');
     } catch(e) { alert(e.error || 'Debloat failed'); }
     setTimeout(() => setDebloating(false), 8000);
+  }
+
+  async function doWifiRecover() {
+    // #439. Clears Android's auto-join block, which is what stops a
+    // provisioned device joining at all: on a local-only LAN every connection
+    // is reported as "no internet", the counter climbs every boot, and
+    // WifiAutoJoinController stops associating. Reports the counter either
+    // way, so the operator learns whether the device was actually affected.
+    // The reboot is REQUIRED and said so in both directions — rebooting
+    // somebody's assistant is not a thing to do quietly.
+    setWifiRecovering(true);
+    try {
+      const r = await API.post(`/api/devices/${device.device_id}/wifi_recover`, {});
+      const n = r.no_internet_reports;
+      alert('WiFi auto-join recovery applied'
+            + (n ? ` (Android had logged ${n} "no internet" reports)` : '')
+            + '.\n\nREBOOT THE DEVICE for this to take effect — the network '
+            + 'history is held in memory and will otherwise be written back. '
+            + 'From the Maintenance tab.');
+    } catch(e) { alert(e.error || 'WiFi recovery failed'); }
+    setTimeout(() => setWifiRecovering(false), 8000);
   }
 
   async function doInstallAssets() {
@@ -2733,6 +2755,36 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
                       Not available — this device is not running Android, so there is nothing to debloat.
                     </div>
                   )}
+
+                  {/* #439. For a device that has stopped joining its network.
+                      Separate from debloat because it is a different fault with
+                      a different trigger, and because this one needs a reboot to
+                      take effect — which both the button and the response say
+                      out loud, since silently rebooting a voice assistant is
+                      not a thing to do to somebody.
+
+                      Gated on the server's own `androidUserspace`, not a rule
+                      re-derived here: emOS drives wpa_supplicant directly and
+                      has neither command, so the endpoint refuses rather than
+                      the button being the only guard. */}
+                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--hairline)' }}>
+                    <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:'var(--text2)', lineHeight:1.7, marginBottom:10 }}>
+                      <strong>Device has stopped joining WiFi.</strong> Android 5.1 counts every
+                      connection to a local-only network as "no internet" and stops
+                      auto-joining once the count climbs. This resets that count and stops
+                      it climbing again. <strong>The device needs a reboot afterwards</strong> —
+                      Android holds the history in memory and writes it back otherwise.
+                    </div>
+                    <Pill small disabled={!device.connected || wifiRecovering || device.androidUserspace === false}
+                          onClick={doWifiRecover}>
+                      {wifiRecovering ? 'Applying…' : 'Clear WiFi auto-join block'}
+                    </Pill>
+                    {device.androidUserspace === false && (
+                      <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:'var(--muted)', marginTop:10 }}>
+                        Not available — this device drives wpa_supplicant directly and has no such block.
+                      </div>
+                    )}
+                  </div>
                 </Panel>
               )}
 

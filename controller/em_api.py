@@ -476,6 +476,7 @@ async def create_app() -> web.Application:
     app.router.add_post("/api/provision/emos_image",   _post_provision_emos_image)
     app.router.add_post("/api/devices/{id}/pair",         _post_pair)
     app.router.add_post("/api/devices/{id}/debloat",      _post_debloat)
+    app.router.add_post("/api/devices/{id}/wifi_recover", _post_device_wifi_recover)
 
     # Live events WebSocket
     app.router.add_get("/api/events", _ws_events)
@@ -3906,6 +3907,85 @@ async def _post_debloat(request: web.Request) -> web.Response:
     # a session a concurrent caller had opened.
     em_tasks.spawn(_sync_debloat(live, device_id))
     return _ok({"started": True})
+
+
+@auth.require_admin
+async def _post_device_wifi_recover(request: web.Request) -> web.Response:
+    """
+    POST /api/devices/{id}/wifi_recover — clear Android's WiFi auto-join
+    block on a device already in the field (#439).
+
+    #416 stops NEW provisions acquiring this. Every device provisioned before
+    it keeps the fault with no way to clear it from the dashboard, and the
+    fault is that the device stops joining at all: Android 5.1's
+    WifiAutoJoinController suppresses auto-join once
+    `numNoInternetAccessReports` climbs high enough, and on a local-only
+    network every successful connection is reported as having no internet, so
+    the counter grows on every boot until it stops associating.
+
+    The counter is read FIRST and reported, whether or not the fault is
+    present. The issue asks whether this can detect the condition rather than
+    wait to be told; answering with the number costs one shell round trip and
+    turns a button whose only output is "done" into one that says whether the
+    device was actually affected.
+
+    The reboot is required, and the response says so rather than leaving the
+    operator to reboot an Echo and wonder. `WifiStateMachine` holds the
+    network history in its Java layer, so deleting the file under a running
+    framework is likely to be rewritten from memory; the `settings` half
+    survives, because that is a value rather than a file the daemon owns.
+    """
+    device_id = request.match_info["id"]
+    live = _devices.get(device_id)
+    if live is None:
+        return _error("device_offline", f"Device not connected: {device_id}", 409)
+
+    # Refused server-side for the same reason debloat is: a plain POST with a
+    # session token, so a greyed-out button protects nothing. emOS drives
+    # wpa_supplicant directly — no `settings` binary, no networkHistory.txt, no
+    # WifiAutoJoinController — so neither command exists there and the cost of
+    # running them anyway is two shell sessions and a confusing log.
+    if not live.android_userspace:
+        return _error(
+            "not_android",
+            "This device is not running Android, so there is no WiFi auto-join "
+            "block to clear — it drives wpa_supplicant directly.",
+            409)
+
+    # No user text reaches these commands, and none can: both are fixed
+    # strings. They are still sent as arguments, never interpolated into a
+    # larger shell line.
+    reports = (await _shell_run(
+        live, "su -c 'settings get global num_no_internet_access_reports'"
+    )).strip()
+
+    await _shell_run(live, "su -c 'rm -f /data/misc/wifi/networkHistory.txt'")
+    await _shell_run(
+        live, "su -c 'settings put global captive_portal_detection_enabled 0'")
+
+    # Read back rather than trusting the write. The provisioning wizard already
+    # fails its run on this check, which is the precedent: a command that
+    # reported success while doing nothing is the failure this whole area has.
+    after = (await _shell_run(
+        live, "su -c 'settings get global captive_portal_detection_enabled'"
+    )).strip()
+    if after != "0":
+        return _error(
+            "wifi_recover_unverified",
+            f"Captive portal detection reads back "
+            f"{after or '(empty)'}, expected 0 — the device may not have a "
+            f"working `settings` binary.",
+            502)
+
+    em_dbwriter.submit(db.log_device, device_id, "info", "controller",
+                       f"WiFi auto-join recovery applied "
+                       f"(no-internet reports were {reports or 'unreadable'}); "
+                       f"reboot required")
+    return _ok({
+        "applied": True,
+        "no_internet_reports": reports or None,
+        "reboot_required": True,
+    })
 
 
 async def _issue_credentials(device_id: str) -> None:

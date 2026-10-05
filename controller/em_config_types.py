@@ -52,6 +52,7 @@ KINDS: dict[str, str] = {
     "duckDb": FLOAT,
     "responseLevel": STR,
     "beamAngle": FLOAT,
+    "wakeMic": INT,
     "beamformingEnabled": BOOL,
     "agcEnabled": BOOL,
     "aecEnabled": BOOL,

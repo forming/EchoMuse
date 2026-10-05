@@ -87,6 +87,16 @@ def test_shadow_capability_is_surfaced_to_the_dashboard():
         "the dashboard must gate the on-device toggle on the capability"
 
 
+def test_wake_mic_capability_is_surfaced_to_the_dashboard():
+    """Older firmware ignores `wakeMic` (#705), so the control must not be
+    offered there as a switch that does nothing."""
+    assert "wake_mic" in device_capabilities(), "firmware no longer announces wake_mic"
+    assert "wake_mic_capable" in CONTROLLER.read_text()
+    assert "wakeMicCapable" in API.read_text()
+    jsx = (ROOT / "controller" / "static" / "dashboard.jsx").read_text()
+    assert "disabled={!wakeMicCapable}" in jsx
+
+
 def test_volume_cue_capability_is_surfaced_to_the_dashboard():
     """Old firmware must not be offered a switch it cannot honour."""
     caps = device_capabilities()

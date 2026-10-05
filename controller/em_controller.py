@@ -80,6 +80,7 @@ import em_api as api
 import em_pki
 import em_hostip
 import em_linkauth
+import em_linkdown
 import em_pairing
 import em_config_types
 import em_dbwriter
@@ -499,6 +500,12 @@ class Device:
         # Transient state — read by em_api._merge_device()
         self.speaking  = False
         self.muted     = False
+        # #354: when the control connection closed and the device went into
+        # its reconnect grace. None while connected. The device is out of
+        # _devices for the grace but its HA satellite still accepts turns, so
+        # this is what tells the turn path not to run one against dead
+        # sockets. Stamped by the close path, cleared by registration.
+        self.link_down_since: float | None = None
         # HA's wake word picker (#286); seeded from the DB at connect.
         self.wake_word_enabled = True
         self.listening = False
@@ -1946,7 +1953,9 @@ async def _barge_watcher(device: Device, playback_started: asyncio.Event):
                     # precedence is a SECOND rule that can disagree with the
                     # first, and would need a way to revoke a claim a
                     # neighbour has already started a turn on.
-                    serves = esphome.can_serve_turn(device.device_id)
+                    serves = esphome.can_serve_turn(
+                        device.device_id,
+                        linked=_devices.get(device.device_id) is device)
                     won_by = device.device_id
                     if serves and device.wake_arb_ms > 0 and len(_devices) > 1:
                         # Capture time already carries the link's least
@@ -3383,7 +3392,9 @@ async def _private_wake_turn(device: Device, ev: dict) -> None:
         "noise_floor": round(device.noise_floor, 5),
     }
 
-    serves = esphome.can_serve_turn(device.device_id)
+    serves = esphome.can_serve_turn(
+        device.device_id,
+        linked=_devices.get(device.device_id) is device)
     won_by = device.device_id
     if serves and device.wake_arb_ms > 0 and len(_devices) > 1:
         won_by = await _claim_wake(device, _wake_heard_at(device, ev),
@@ -3449,7 +3460,9 @@ async def _private_barge(device: Device, ev: dict) -> None:
     em_dbwriter.submit(db.log_device, device.device_id, "info", "device",
                   f"Barge-in during {phase} (score={score:.3f})")
     device.barge_detected = True
-    serves = esphome.can_serve_turn(device.device_id)
+    serves = esphome.can_serve_turn(
+        device.device_id,
+        linked=_devices.get(device.device_id) is device)
     won_by = device.device_id
     if serves and device.wake_arb_ms > 0 and len(_devices) > 1:
         won_by = await _claim_wake(device, _wake_heard_at(device, ev),
@@ -4006,7 +4019,9 @@ async def _stream_listen(device: Device):
                         # trigger_voice_turn refuses on — so a device counted
                         # as able cannot turn out to be unable a tick later
                         # for any reason the controller already knows about.
-                        serves = esphome.can_serve_turn(device.device_id)
+                        serves = esphome.can_serve_turn(
+                            device.device_id,
+                            linked=_devices.get(device.device_id) is device)
                         won_by = device.device_id
                         if serves and device.wake_arb_ms > 0 and len(_devices) > 1:
                             # No wait unless the fleet is mixed (Echoes
@@ -4228,7 +4243,9 @@ async def handle_button_event(device: Device, event: dict):
             # for exactly the same reason; the button was the one deliberate
             # cancel that did not.
             await device.send_control({"type": "speaker_flush"})
-        elif not esphome.can_serve_turn(device.device_id):
+        elif not esphome.can_serve_turn(
+                device.device_id,
+                linked=_devices.get(device.device_id) is device):
             # Same stand-down as the wake path, and it needs to be here too:
             # the button is the control someone reaches for precisely when
             # the wake word appears to have done nothing, so it is the worst
@@ -4716,6 +4733,29 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
             # Same shape as the button turn — a deliberate act with no wake
             # word, so mic_stop/mic_start_turn to get the beam-locked stream,
             # and preroll_discard 0 because there is no wake-word tail to trim.
+            #
+            # #354: the satellite outlives its device's control connection for
+            # CONTROL_RECONNECT_GRACE_S, so HA can start a conversation while
+            # the Echo has no link. Running the turn then means no microphone
+            # frames, an expired FIRST_AUDIO_GRACE, and a row persisted as
+            # `no_speech` — a silent user for a turn that never had a chance.
+            # Refuse here, before the turn starts, and say why.
+            if em_linkdown.link_down(
+                    in_registry=_devices.get(_d.device_id) is _d,
+                    link_down_since=_d.link_down_since):
+                log.info(
+                    f"[{_d.device_id}] start_conversation while the control "
+                    f"link is down — refusing rather than running a turn with "
+                    f"no microphone"
+                )
+                em_dbwriter.submit(db.log_device,
+                    _d.device_id, "info", "controller",
+                    "Home Assistant asked a question while the link was down; "
+                    "refused, no turn run")
+                await esphome._record_dropped_turn(
+                    _d, esphome.CONVERSATION_TRIGGER, None,
+                    outcome="pipeline_refused")
+                return
             #
             # The mute check is here rather than a refusal further up because
             # of what HA does with a refusal: `async_internal_ask_question`
@@ -5459,6 +5499,12 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
                 # Stamp the moment it went away, so "last seen" is exact for
                 # an offline device rather than up to one stats report stale.
                 em_dbwriter.submit(db.touch_device_seen, device.device_id)
+                # #354: stamp the blip before the pop, so a turn HA starts
+                # inside the grace can tell "the link is down and coming back"
+                # from "this Echo was never here". The pop itself is unchanged
+                # — the registry keeps saying what it says today, and
+                # em_linkdown.link_down reads the two together.
+                device.link_down_since = time.monotonic()
                 _devices.pop(device.device_id, None)
                 # #315: the services stay up for a grace window instead of
                 # being torn down immediately — a four-second link blip used

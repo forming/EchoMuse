@@ -2826,7 +2826,7 @@ def get_status(device_id: str) -> Optional[dict]:
 
 # ─── Voice turn trigger ───────────────────────────────────────────────────────
 
-def can_serve_turn(device_id: str) -> bool:
+def can_serve_turn(device_id: str, linked: bool = True) -> bool:
     """
     Whether a voice turn started on this device right now could reach Home
     Assistant.
@@ -2837,7 +2837,17 @@ def can_serve_turn(device_id: str) -> bool:
     the `get_status` rule one step further out. Callers use it to stand a
     device down BEFORE it takes an arbitration claim or holds the voice lock,
     so an Echo with nothing behind it cannot silence one that could answer.
+
+    `linked` (#354) is the device's control connection. A satellite survives
+    its device's control-plane blip for CONTROL_RECONNECT_GRACE_S, so
+    get_satellite() is not enough on its own: without this, a wake in that
+    window takes the claim, runs a turn against closed sockets, and the row is
+    persisted as `no_speech` — a silent user for a turn that never had a
+    chance. Defaults True so a caller that has no link state keeps today's
+    behaviour; em_controller passes the registry identity check.
     """
+    if not linked:
+        return False
     server = _servers.get(device_id)
     return server is not None and server.get_satellite() is not None
 
@@ -2857,7 +2867,8 @@ async def record_dropped_wake(device, trigger_label: str, wake_info) -> None:
     await _record_dropped_turn(device, trigger_label, wake_info)
 
 
-async def _record_dropped_turn(device, trigger_label: str, wake_info) -> None:
+async def _record_dropped_turn(device, trigger_label: str, wake_info,
+                               outcome: str = "no_ha") -> None:
     """
     Persist a stub record for a turn that never started (no ESPHome server /
     no HA connection). Without this, wakes during an HA outage would vanish
@@ -2869,6 +2880,12 @@ async def _record_dropped_turn(device, trigger_label: str, wake_info) -> None:
     with no other way to find out. Without it the ring lit and cleared inside
     a few milliseconds, which is the "looked like a glitch" failure ack_anim
     was added for, on a device that will not answer until HA connects.
+
+    `outcome` (#354) separates "nothing behind this Echo" from "the pipeline
+    could not be entered". A turn refused inside a control-plane blip has a
+    satellite and a live HA connection — only the Echo's link is gone — so
+    recording it as no_ha would file a working HA integration under a fault
+    it does not have.
     """
     wi = wake_info or {}
     turn_record = {
@@ -2878,7 +2895,7 @@ async def _record_dropped_turn(device, trigger_label: str, wake_info) -> None:
         "wake_score":     wi.get("score"),
         "wake_threshold": wi.get("threshold"),
         "noise_floor":    wi.get("noise_floor"),
-        "outcome":        "no_ha",
+        "outcome":        outcome,
         "total_ms":       0,
     }
     await _persist_turn(device, turn_record)

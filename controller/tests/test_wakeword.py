@@ -268,13 +268,19 @@ def test_the_stored_rule_runs_where_the_device_reports_listening():
         "the stored-off rule must be reached from the listen_state branch, "
         "which is where the device says what it is doing with its microphone"
     )
-    # Both halves have to move, or the picker and the next restart disagree.
+    # The live state and Home Assistant go to on; the database keeps off.
+    # The temporary flag is what makes a later "on" request stick.
     dumped = ast.unparse(branch)
-    for needed in ("set_wake_word_enabled", "update_wake_word"):
+    for needed in ("wake_word_temporarily_on", "update_wake_word"):
         assert needed in dumped, (
-            f"{needed} is missing — a stored value left unsynced reads as 'on' "
-            "in the picker and 'off' again after the next restart"
+            f"{needed} is missing — the live state must go on while the stored "
+            "value stays off, and the temporary flag is what makes a later 'on' "
+            "request stick after an upgrade"
         )
+    assert "set_wake_word_enabled" not in dumped, (
+        "the stored value must NOT be written here — keeping it off is what "
+        "lets the person's choice come back after an upgrade"
+    )
 
 
 # ── The same on either side of the wake word split ──────────────────────────
@@ -343,3 +349,31 @@ def test_the_wake_listener_stops_a_stray_stream():
     src = _func("_stream_listen")
     at = src.index("em_wakeword.stray_stream(")
     assert "mic_stop()" in src[at:at + 600]
+
+
+def test_a_request_for_on_while_temporarily_on_is_stored():
+    """
+    #776: when the live value was turned on for a firmware that cannot honour
+    off, the stored value is still off. A request for "on" here must still be
+    stored, or the person's choice comes back as off after the upgrade — they
+    would have to set it twice. The live value is already on, so on_request
+    reports no change; this writes the stored value and clears the flag.
+    """
+    tree = ast.parse((CONTROLLER / "em_controller.py").read_text())
+    # _set_wake_word is nested inside another function, so search the whole tree.
+    set_fn = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_set_wake_word":
+            set_fn = node
+            break
+    assert set_fn is not None, "_set_wake_word not found"
+
+    body = ast.unparse(set_fn)
+    assert "wake_word_temporarily_on" in body, (
+        "_set_wake_word must check the temporary flag — a request for 'on' "
+        "while temporarily on must still be stored, or the person's choice "
+        "comes back as off after the upgrade"
+    )
+    assert "set_wake_word_enabled" in body, (
+        "the stored value must be written when the temporary flag is set"
+    )

@@ -18,10 +18,9 @@ configuration:
     description: >-
       The wss (TLS) port used by devices that hold pushed credentials,
       advertised to them over the network. Change it only if another service
-      on this host already uses it. Setting it to 0 switches the encrypted
-      listener off, which on firmware v2.17.0 and later takes every
-      credentialed device offline until each one is re-paired: hold the
-      device's action button for 5 seconds, then approve it here.
+      on this host already uses it — the port is meant to move, and switching
+      the listener off is not a way back: a device holding a certificate will
+      not reconnect until it is re-paired by hand.
   server_ip:
     name: Controller LAN IP address
     description: >-

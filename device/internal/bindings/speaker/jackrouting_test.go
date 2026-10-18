@@ -89,6 +89,58 @@ func TestJackRoutingIsIdempotent(t *testing.T) {
 	}
 }
 
+// The boot path routes the position the switch actually reports, and routes
+// NOTHING when the switch cannot be read: a failed read is not an empty jack,
+// so Init leaves the internal amp on exactly as it always did rather than
+// asserting a position it cannot know. That is the half of boot-with-a-plug
+// that lives in Init — jack.Watch's first dispatch runs later, after the
+// clients are up, so a device booted with a cable in played to the room for
+// that whole gap.
+func TestBootJackRoutingUsesThePositionTheSwitchReports(t *testing.T) {
+	for _, tc := range []struct {
+		what     string
+		state    int
+		ok       bool
+		inserted bool
+		apply    bool
+	}{
+		{"headset (with mic)", 1, true, true, true},
+		{"headphone (no mic)", 2, true, true, true},
+		{"jack empty", 0, true, false, true},
+		{"no detect switch", 0, false, false, false},
+		{"unparseable state", 0, false, false, false},
+	} {
+		inserted, apply := bootJackRouting(tc.state, tc.ok)
+		if apply != tc.apply || inserted != tc.inserted {
+			t.Errorf("%s: bootJackRouting(%d, %v) = (%v, %v), want (%v, %v)",
+				tc.what, tc.state, tc.ok, inserted, apply, tc.inserted, tc.apply)
+		}
+	}
+}
+
+// What boot applies must be what jack.Watch's first dispatch applies for the
+// same position: on a boot with a readable switch the two run back to back,
+// and a disagreement would flip the routing on the first callback.
+func TestBootJackRoutingMatchesTheWatcher(t *testing.T) {
+	for _, state := range []int{0, 1, 2} {
+		inserted, ok := bootJackRouting(state, true)
+		if !ok {
+			t.Fatalf("state %d: a readable switch must route", state)
+		}
+		boot := jackRouting(inserted)
+		watch := jackRouting(state != 0)
+		if len(boot) != len(watch) {
+			t.Fatalf("state %d: %d writes at boot, %d on the first dispatch", state, len(boot), len(watch))
+		}
+		for i := range boot {
+			if boot[i].Ctl != watch[i].Ctl || boot[i].Args[0] != watch[i].Args[0] {
+				t.Errorf("state %d: write %d: boot %v/%v, watch %v/%v",
+					state, i, boot[i].Ctl, boot[i].Args, watch[i].Ctl, watch[i].Args)
+			}
+		}
+	}
+}
+
 func TestJackRoutingDriftRewritesOnlyWhatMoved(t *testing.T) {
 	// Gain clobbered back to the floor, amp still correct — the exact state
 	// measured after a mediaserver restart with a plug in.

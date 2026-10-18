@@ -445,10 +445,12 @@ func main() {
 	})
 
 	// Headphone jack. BOTH directions need work from us, and so does the
-	// state the device booted into — accdet acts only on a transition, and
-	// Init leaves the internal amp on regardless of what is plugged in.
-	// SetJackRouting owns the whole mapping (issue #80 for the removal half,
-	// measured against a stock Dot 2026-09-03 for the rest).
+	// state the device booted into — accdet acts only on a transition, and a
+	// boot has no edge. Init routes the position it can read for itself as it
+	// brings the output up (bootJackRouting); this is the baseline every later
+	// edge is measured from, and the correction for a boot whose switch was
+	// not readable yet. SetJackRouting owns the whole mapping (issue #80 for
+	// the removal half, measured against a stock Dot 2026-09-03 for the rest).
 	go jack.Watch(ctx, func(inserted bool) {
 		pcmSpeaker.SetJackRouting(inserted)
 	})

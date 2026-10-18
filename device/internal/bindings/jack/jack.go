@@ -84,10 +84,11 @@ func Present() bool {
 // The first reading DOES fire, and dropping it is what broke boot-with-a-plug.
 // It used to seed the baseline silently, on the reasoning that "Init has
 // already put the speaker amp in the right state for the current jack
-// position" — which was simply not true: PcmSpeaker.Init sets the amp ON
+// position" — which was simply not true: PcmSpeaker.Init asserted the amp ON
 // unconditionally, because its
 // click-free startup order needs the amp brought up onto a DAC already
-// clocking silence, and it has no idea whether a plug is present.
+// clocking silence, and it did that without knowing whether a plug was
+// present.
 //
 // So a device booted with a cable in got the internal amp asserted by Init and
 // nothing afterwards to correct it — accdet only acts on a transition, and a
@@ -95,6 +96,12 @@ func Present() bool {
 // the room, and the jack sat at minimum gain. Measured on hardware 2026-09-03
 // (h2w=1, Ext_Speaker_Amp_Switch=On). Unplugging and replugging "fixed" it by
 // manufacturing the edge the boot never had.
+//
+// Init now reads the switch itself as it brings the output up, so this
+// dispatch is no longer the boot's only correction: it is the baseline every
+// later edge is measured from, and the whole of the correction on a device
+// whose switch could not be read at bring-up but can be read a moment later —
+// the one case a silently seeded baseline would never act on.
 //
 // onChange must therefore be idempotent, which SetJackRouting is.
 //

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/wilbowes/EchoMuse/internal/bindings/codec"
+	"github.com/wilbowes/EchoMuse/internal/bindings/jack"
 	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
 	"github.com/wilbowes/EchoMuse/internal/outchain"
 	"github.com/wilbowes/EchoMuse/pkg/board"
@@ -328,8 +329,37 @@ func (p *PcmSpeaker) Init() error {
 
 	go p.silenceLoop()
 
-	time.Sleep(100 * time.Millisecond)        // silence reaches the DAC (~2 periods)
-	mixer.Set(mixer.SpeakerAmp, "On")         // enable amp onto a clocked, silent DAC
+	time.Sleep(100 * time.Millisecond) // silence reaches the DAC (~2 periods)
+	// Bring the output up onto the plug position the switch reports, not onto
+	// one assumed. This was an unconditional amp On, leaving jack.Watch — a
+	// goroutine started later in main, after the clients — to un-assert it, so
+	// a device that booted with a cable in played to the room and left the
+	// jack at minimum gain for the whole of that gap. With no switch to read,
+	// the old behaviour stands: the amp comes up on a clocking, silent DAC and
+	// jack.Watch decides later.
+	// accdet populates /sys/class/switch/h2w/state asynchronously at boot, so a
+	// single read right after the silence stream starts can still read 0 with a
+	// cable plugged in (#380): the amp then stays asserted and audio plays to
+	// the room while the jack sits at minimum gain, until someone unplugs and
+	// replugs it. Poll briefly for a non-empty reading before deciding the
+	// boot routing; a cable that is really there usually shows up within a
+	// second. If it never does, fall back to the old behaviour (no jack) so a
+	// device we cannot ask behaves as one with no jack.
+	state, ok := jack.State()
+	for i := 0; i < 20 && ok && state == 0; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if s, o := jack.State(); o {
+			state, ok = s, o
+			if state != 0 {
+				break
+			}
+		}
+	}
+	if inserted, ok := bootJackRouting(state, ok); ok {
+		p.SetJackRouting(inserted)
+	} else {
+		mixer.Set(mixer.SpeakerAmp, "On") // enable amp onto a clocked, silent DAC
+	}
 	time.Sleep(50 * time.Millisecond)         // let amp settle
 	mixer.Set(mixer.PlaybackVolume, dacUnity) // unmute: volume is applied in software
 
@@ -393,10 +423,14 @@ func waitForFreePcm(card, device int, timeout time.Duration) {
 //     ctl 62 with music playing took the jack from silent to audible, with the
 //     loopback tap `ref` unchanged, so it is a post-DAC analog stage).
 //   - Neither accdet nor the old code ran at BOOT, because both are
-//     edge-triggered and a boot has no edge. Init unconditionally sets the amp
-//     ON, so a device booted with a cable in played out its internal speaker
-//     until someone unplugged and replugged — which is exactly why replugging
-//     was the folk remedy. It manufactures the edge the boot never had.
+//     edge-triggered and a boot has no edge. Init set the amp ON
+//     unconditionally, so a device booted with a cable in played out its
+//     internal speaker until someone unplugged and replugged — which is
+//     exactly why replugging was the folk remedy. It manufactures the edge the
+//     boot never had. Init now reads the switch as it brings the output up
+//     (bootJackRouting) and routes the position it finds; a device whose
+//     switch cannot be read at that moment is still corrected by jack.Watch's
+//     first dispatch.
 func (p *PcmSpeaker) SetJackRouting(inserted bool) {
 	p.jackMu.Lock()
 	p.jackInserted = inserted

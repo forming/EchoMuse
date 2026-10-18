@@ -103,6 +103,29 @@ func jackRouting(inserted bool) []mixerWrite {
 	}
 }
 
+// bootJackRouting answers what the boot path does with the plug position it
+// finds as the output comes up: the position to route to, and whether there is
+// one to route to at all.
+//
+// The second return is false when the detect switch could not be read — no
+// accdet node, or a state file that does not parse. Init then leaves the
+// routing exactly as it has always been, and jack.Watch dispatches nothing
+// either: a failed read is not evidence of an empty jack, so a device we
+// cannot ask behaves as one with no jack rather than as one whose plug has
+// just come out. Same rule as jackRoutingDrift's unreadable controls.
+//
+// Boot needs this of its own rather than waiting for jack.Watch's first
+// dispatch, which is started in main after the clients are set up: Init used
+// to assert the internal amp for that whole gap. Measured 2026-09-03, a Dot
+// booted with a cable in (h2w=1) read Ext_Speaker_Amp_Switch=On and played to
+// the room with the cable connected, until someone unplugged and replugged it.
+func bootJackRouting(state int, ok bool) (inserted bool, apply bool) {
+	if !ok {
+		return false, false
+	}
+	return state != 0, true
+}
+
 // chainForJack returns the output chain configuration a plug position needs:
 // the controller's params unchanged, except that the bass guard is bypassed
 // while something is in the jack.

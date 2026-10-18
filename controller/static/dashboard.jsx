@@ -2072,7 +2072,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-5)' }}>
               <div className="em-on-dark" style={{ background: 'linear-gradient(160deg,var(--lcd-face),var(--lcd-deep))', border: '1px solid var(--lcd-line)', borderRadius: 'var(--radius-md)', padding: '5px 12px', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)' }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--fs-md)', color: state.lcd, textShadow: `0 0 8px ${state.dot}88`, letterSpacing: 'var(--tracking-text)' }}>{state.label.toUpperCase()}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--fs-md)', color: state.lcd, textShadow: `0 0 8px color-mix(in srgb, ${state.dot} 53%, transparent)`, letterSpacing: 'var(--tracking-text)' }}>{state.label.toUpperCase()}</span>
               </div>
               {isAdmin && !confirmDelete && (
                 <CircleButton onClick={() => setConfirmDelete(true)} title="Delete device" color="var(--error)">🗑</CircleButton>
@@ -2957,7 +2957,7 @@ function Card({ device, onClick }) {
             collide left cards in one row with footers of different heights.
             So the IP always has its own line. */}
         <div className="em-inset" style={{ '--em-inset-radius':'var(--radius-md)', '--em-inset-pad':'var(--space-4) var(--space-6)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-2)' }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--fs-md)', color: state.lcd, letterSpacing: 'var(--tracking-label)', textShadow: `0 0 8px ${state.dot}88`, whiteSpace: 'nowrap' }}>{state.label.toUpperCase()}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--fs-md)', color: state.lcd, letterSpacing: 'var(--tracking-label)', textShadow: `0 0 8px color-mix(in srgb, ${state.dot} 53%, transparent)`, whiteSpace: 'nowrap' }}>{state.label.toUpperCase()}</span>
           {(() => {
             const ip = device.ip && device.ip !== '127.0.0.1' ? device.ip : null;
             return (
@@ -11398,7 +11398,7 @@ function App() {
         ].map(([label, val, c]) => (
           <div key={label} className="em-inset" style={{ flex: 1 }}>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--fs-2xs)', color: 'var(--lcd-dim)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-heading)', marginBottom: 'var(--space-3)' }}>{label}</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--fs-2xl)', color: c, lineHeight: 1, textShadow: `0 0 12px ${c}66` }}>{val}</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--fs-2xl)', color: c, lineHeight: 1, textShadow: `0 0 12px color-mix(in srgb, ${c} 40%, transparent)` }}>{val}</div>
           </div>
         ))}
         {release && (

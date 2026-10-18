@@ -212,6 +212,25 @@ function _levelColor(level) {
        : level === 'ok' ? 'var(--ok)' : undefined;
 }
 
+// #301: the one line the device page shows about its link's last hours, from
+// the controller's own verdict over them (em_link_health). This is the data
+// the page did not have at all: the meters and the loss strip below are "now",
+// where a link failing over weeks reads fine every time anyone looks.
+//
+// null when there is no verdict to show. "Not enough history yet" and "not
+// measured recently" are the quiet states of a device the page is already
+// describing as new or offline, and a line that is always on is one nobody
+// reads — so those pass through as nothing rather than as a diagnosis.
+function _linkHealthDetail(health) {
+  const level = health && health.level;
+  if (level !== 'ok' && level !== 'warn' && level !== 'error') return null;
+  return {
+    sev:  level === 'error' ? 'bad' : level,
+    text: health.text,
+    note: health.note,
+  };
+}
+
 function relTime(ts) {
   if (!ts) return '—';
   const d = Date.now() - ts * 1000;
@@ -2341,6 +2360,29 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
                       />
                     </div>
                     {lq && <LinkStrip minutes={lq.minutes}/>}
+                    {(() => {
+                      const lh = _linkHealthDetail(device.linkHealth);
+                      if (!lh) return null;
+                      // Below the meters rather than beside them: the meters
+                      // are "now", this is the last hours, and the count of
+                      // hours over the bar is the only part that can say
+                      // "getting worse" — a single reading cannot.
+                      return (
+                        <div style={{ marginTop:'var(--space-6)', display:'flex', gap:'var(--space-4)', alignItems:'baseline' }}>
+                          {/* Not colour alone and not a bare icon: the glyph
+                              and the words beside it carry the meaning, the
+                              colour only reinforces it. */}
+                          <span aria-hidden="true" style={{ color: SEV[lh.sev], flexShrink:0 }}>{lh.sev === 'ok' ? '✓' : '⚠'}</span>
+                          <span style={{ minWidth:0 }}>
+                            <span style={{ fontFamily:"var(--font-mono)", fontSize:'var(--fs-xs)', fontWeight:600,
+                                           color: lh.sev === 'ok' ? 'var(--muted)' : SEV[lh.sev] }}>{lh.text}</span>
+                            <div style={{ fontFamily:"var(--font-mono)", fontSize:'var(--fs-xs)', color:'var(--muted)', marginTop:'var(--space-1)' }}>
+                              Link health · {lh.note}
+                            </div>
+                          </span>
+                        </div>
+                      );
+                    })()}
                     {!s && <div style={{ fontFamily:"var(--font-mono)", fontSize:'var(--fs-xs)', color:'var(--muted)', marginTop:'var(--space-4)' }}>waiting for device stats…</div>}
                   </Panel>
                 </div>

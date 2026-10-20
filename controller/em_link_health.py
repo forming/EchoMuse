@@ -230,3 +230,22 @@ def verdicts(rows: list[dict], now: float | None = None) -> dict[str, dict]:
         out[device_id] = _verdict(hours, now, _percentile(rates, WARN_PCTL),
                                   _percentile(rates, BAD_PCTL))
     return out
+
+
+def changed(previous: dict, current: dict) -> list[tuple[str, dict | None]]:
+    """
+    Devices whose verdict moved between two reads, as (device_id, verdict).
+
+    `verdict` is None for a device that no longer has one — a removed device,
+    or hours that have all aged out of the window — and the caller pushes that
+    too: an indicator with no way to clear itself is the failure the design on
+    #301 names. Whole-object comparison rather than a field diff, because the
+    dashboard replaces the object it holds: a new level left standing over the
+    old sentence is exactly the drift a field-wise diff would let through.
+    """
+    out = []
+    for device_id in sorted(set(previous) | set(current)):
+        verdict = current.get(device_id)
+        if verdict != previous.get(device_id):
+            out.append((device_id, verdict))
+    return out

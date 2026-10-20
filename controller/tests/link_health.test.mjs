@@ -73,8 +73,60 @@ const status = src.slice(src.indexOf("{tab === 'status' &&"),
 check("the Status tab reads the verdict from the device payload",
       status.includes("_linkHealthDetail(device.linkHealth)"));
 check("the line names itself", status.includes("Link health · "));
-check("nothing else draws one",
-      (src.match(/_linkHealthDetail\(/g) || []).length === 2);
+// The definition, the two readers the propagation is built on, and the line.
+// A fifth would be a second opinion about a level, free to disagree with the
+// sentence beside it.
+check("every reader of the verdict goes through _linkHealthDetail",
+      (src.match(/_linkHealthDetail\(/g) || []).length === 4);
+
+// ── #301: severity propagates up the page ────────────────────────────────────
+//
+// The rules from the design comment, pinned: the worst thing under a container
+// is what the container shows and is never summed, a part with nothing to say
+// cannot raise one, and the tile's severity is read from what is behind its
+// tabs rather than from the source — so a second source inherits upward
+// instead of needing an indicator of its own.
+const _linkHealthDetail = lift("_linkHealthDetail");
+const worstHealthSev = lift("worstHealthSev");
+const linkHealthSev  = lift("linkHealthSev");
+const tabHealthSev   = lift("tabHealthSev");
+const tileHealthSev  = lift("tileHealthSev");
+const healthReason   = lift("healthReason");
+
+check("the worst under a container is what it shows",
+      worstHealthSev("warn", "ok") === "warn");
+check("three warnings do not become an error",
+      worstHealthSev("warn", "warn", "warn") === "warn");
+check("a bad part is not averaged away",
+      worstHealthSev("ok", "warn", "bad") === "bad");
+check("a part with nothing to say cannot raise one",
+      worstHealthSev(null, "warn") === "warn");
+check("nothing anywhere is nothing", worstHealthSev(null, undefined) === null);
+
+check("the tile takes the worst of its tabs", tileHealthSev({ linkHealth: bad }) === "bad");
+check("the tab the problem lives in carries it",
+      tabHealthSev({ linkHealth: warn }).status === "warn");
+check("a healthy device reports ok and draws nothing",
+      linkHealthSev({ linkHealth: ok }) === "ok");
+check("no payload, no severity", linkHealthSev({}) === null);
+check("the tooltip carries the number and the reason",
+      healthReason({ linkHealth: warn }) === warn.text + " — " + warn.note);
+check("and nothing when there is no verdict", healthReason({}) === null);
+
+// The wiring, in the source: the tile, the tab and the panel each draw the
+// marker, and the marker is reachable and never colour alone.
+check("the tile draws it",
+      src.includes("<HealthMark sev={tileHealthSev(device)}"));
+check("the tab strip draws it from the tab's own severity",
+      src.includes("mark={t =>") && src.includes("tabHealthSev(device)[t]"));
+check("the panel the verdict lives in draws it",
+      src.includes("<HealthMark sev={linkHealthSev(device)}"));
+check("the marker takes focus and carries the reason",
+      src.includes('tabIndex={0} role="img"') &&
+      src.includes("aria-label={`Link health: ${reason}`}"));
+check("health does not enter deviceState's ranking",
+      !src.slice(src.indexOf("function deviceState"),
+                 src.indexOf("function eventAccent")).includes("linkHealth"));
 
 if (failed) {
   console.error(`\n${failed} failure(s)`);

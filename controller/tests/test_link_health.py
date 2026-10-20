@@ -12,6 +12,7 @@ the fleet's recorded history, built to a shape whose percentiles are stated
 here (10% and 19%) rather than recomputed by the code under test.
 """
 
+import _sources
 import _oww_stub
 
 import em_link_health as LH
@@ -252,3 +253,48 @@ def test_every_device_named_in_the_rows_gets_a_verdict():
     assert out["study"]["level"] == "ok"
     assert out["study"]["text"] == "3% of pings delayed over 200 ms"
     assert LH.verdicts([], NOW) == {}
+
+
+# ─── The push that lets the flag clear itself (#301) ─────────────────────────
+#
+# The design on #301 is explicit that the flag and the push are one operation:
+# an indicator that needs a page refresh to go away teaches people to distrust
+# it. `changed` is the whole of that decision — which devices a dashboard has
+# to be told about between two reads — so it is pinned here rather than in the
+# loop that cannot be imported.
+
+def test_only_devices_whose_verdict_moved_are_pushed():
+    before = {"bedroom": {"level": "ok"}, "study": {"level": "warn"}}
+    after  = {"study": {"level": "warn"}, "hall": {"level": "ok"}}
+    assert LH.changed(before, after) == [("bedroom", None),
+                                         ("hall", {"level": "ok"})]
+
+
+def test_a_new_level_under_the_old_sentence_is_a_change():
+    before = {"bedroom": {"level": "warn",  "text": "12% of pings delayed"}}
+    after  = {"bedroom": {"level": "error", "text": "12% of pings delayed"}}
+    assert LH.changed(before, after) == [("bedroom", after["bedroom"])]
+
+
+def test_a_device_that_no_longer_has_a_verdict_is_pushed_as_none():
+    # Hours aging out of the window is the ordinary way a warning clears.
+    assert LH.changed({"bedroom": {"level": "error"}}, {}) == [("bedroom", None)]
+
+
+def test_nothing_moving_pushes_nothing():
+    same = {"bedroom": {"level": "warn", "text": "12% of pings delayed"}}
+    assert LH.changed(same, dict(same)) == []
+    assert LH.changed({}, {}) == []
+
+
+def test_the_loop_pushes_the_verdict_it_read():
+    """
+    The two lines that make the flag self-clearing: the loop reads the same
+    link_health the API serves, and every move reaches the same push channel
+    the device state uses. A guard, not a call — em_controller cannot be
+    imported by the job that runs this without the openwakeword stub.
+    """
+    body = _sources.code_only(_sources.def_source("_link_verdict_loop"))
+    assert "em_link_health.changed(" in body
+    assert "linkHealth" in body
+    assert "em_events.push(" in body

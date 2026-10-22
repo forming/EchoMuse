@@ -793,15 +793,17 @@ class MediaSession:
                 # fixed once audio is flowing, and re-deriving it mid-track
                 # would switch planes under a decoder already streaming.
                 #
-                # `device` is deliberately NOT rebound to None — the natural-end
-                # and teardown paths below still send an EOS through it, and
-                # send_data fails that fast on a closed socket by design.
+                # A control-only blip pops the device from the registry at once
+                # (handle_control), while #315's grace keeps its services and
+                # its data socket alive. On a miss keep the device we already
+                # have and carry on; device_gone ends the feed when the grace
+                # expires. `device` is deliberately NOT rebound to None — the
+                # natural-end and teardown paths below still send an EOS
+                # through it, and send_data fails that fast on a closed socket
+                # by design.
                 fresh = _get_device(self.device_id) if _get_device else None
-                if fresh is None:
-                    log.warning(f"[{self.device_id}] Device left mid-stream — "
-                                f"ending the feed")
-                    break
-                device = fresh
+                if fresh is not None:
+                    device = fresh
                 # Config is pushed live (em_device_config.apply_live_config), so re-read it
                 # per chunk. update() compares before it touches anything, so
                 # the steady-state cost is a tuple comparison ~23×/s.

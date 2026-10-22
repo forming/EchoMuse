@@ -135,11 +135,11 @@ def test_a_reconnect_mid_stream_moves_the_feed_to_the_new_device():
     assert s.state == IDLE
 
 
-def test_a_feed_whose_device_leaves_entirely_ends_and_releases_the_lock():
-    # The other half of #751: with the replacement gone the getter returns
-    # None, and the feed must stop rather than spin on a device that is not
-    # there. The command lock must come back, or every later command queues
-    # behind a feed that never finishes.
+def test_a_control_blip_does_not_end_the_feed():
+    # A control socket that closes is popped from the registry at once
+    # (handle_control), but #315's grace keeps the device's services and its
+    # data socket alive for CONTROL_RECONNECT_GRACE_S. The feed must keep
+    # playing through it; device_gone ends it when the grace expires.
     async def main():
         device = FakeDevice("office")
         current = [device]
@@ -151,15 +151,22 @@ def test_a_feed_whose_device_leaves_entirely_ends_and_releases_the_lock():
         await s.play("http://radio/old")
         await asyncio.sleep(0.03)
 
+        before = len(device.data_frames)
         current[0] = None
-        await asyncio.wait_for(s._task, 2.0)
-        # And the lock is free — a following command completes rather than
-        # queueing behind a feed that will never finish.
-        await asyncio.wait_for(em_player.stop("office"), 2.0)
-        return s
+        # Several chunks with the registry empty: a 4 s control-only blip.
+        await asyncio.sleep(0.06)
+        during = len(device.data_frames)
 
-    s = asyncio.run(main())
+        # The grace expires and the controller calls device_gone, exactly as
+        # _release_device_services does.
+        em_player.device_gone("office")
+        await asyncio.sleep(0.03)
+        return s, before, during
+
+    s, before, during = asyncio.run(main())
+    assert during > before, "the feed stopped on a control-only blip"
     assert s.state == IDLE
+    assert s._task is None
 
 
 class HalfOpenDevice(FakeDevice):

@@ -2830,6 +2830,9 @@ def get_wake_counters(device_id: str, since: float) -> list[sqlite3.Row]:
 
 def insert_wake_sample(device_id: str, rec: dict) -> int:
     """Persist metadata for one already-written wake sample; prune by id."""
+    # Resolve before _tx(): get_effective_device_config takes _db_lock too,
+    # and _tx() already holds it (#963).
+    keep = effective_wake_clip_keep(device_id)
     with _tx() as conn:
         cur = conn.execute(
             """INSERT INTO wake_samples
@@ -2841,7 +2844,6 @@ def insert_wake_sample(device_id: str, rec: dict) -> int:
              _py(rec.get("device_score")), rec.get("trigger_source")),
         )
         sample_id = cur.lastrowid
-        keep = effective_wake_clip_keep(device_id)
         expired = conn.execute(
             """SELECT id, audio_file FROM wake_samples WHERE device_id = ?
                ORDER BY id DESC LIMIT -1 OFFSET ?""",

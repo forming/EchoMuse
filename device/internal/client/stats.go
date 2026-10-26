@@ -78,10 +78,9 @@ type DeviceStats struct {
 	// the amp switch and HP driver gain as read back (not as written), and
 	// how many drift re-applies have happened since boot (#621). NULL/absent
 	// when the device has no jack or the controls cannot be read.
-	JackInserted   *bool  `json:"jackInserted,omitempty"`
-	JackAmpSwitch  string `json:"jackAmpSwitch,omitempty"`
-	JackHPGain     string `json:"jackHPGain,omitempty"`
-	JackDriftCount int    `json:"jackDriftCount,omitempty"`
+	JackInserted   *bool             `json:"jackInserted,omitempty"`
+	JackMixer      map[string]string `json:"jackMixer,omitempty"`
+	JackDriftCount int               `json:"jackDriftCount,omitempty"`
 	// The base OS deliberately does NOT ride this message — it is a static
 	// property of the boot and goes out once, on registration (control.go).
 	// It was here first and that was the bug: the payload reconcile asks for
@@ -122,8 +121,7 @@ func (c *ControlClient) SendStats(s DeviceStats) {
 		"sendspin":         s.Sendspin,
 		"emmc":             s.Emmc,
 		"jackInserted":     s.JackInserted,
-		"jackAmpSwitch":    s.JackAmpSwitch,
-		"jackHPGain":       s.JackHPGain,
+		"jackMixer":        s.JackMixer,
 		"jackDriftCount":   s.JackDriftCount,
 	})
 }

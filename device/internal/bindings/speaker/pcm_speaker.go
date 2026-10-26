@@ -543,6 +543,18 @@ func (p *PcmSpeaker) JackDriftCount() int {
 	return int(p.jackDrift.Load())
 }
 
+// JackMixerState reads every control the board's jack table writes, by the
+// board's own names (#621). Unreadable controls are omitted.
+func (p *PcmSpeaker) JackMixerState() map[string]string {
+	out := map[string]string{}
+	for _, ctl := range jackControls(p.out.spec.Jack) {
+		if v, err := mixer.Get(ctl); err == nil {
+			out[ctl] = v
+		}
+	}
+	return out
+}
+
 func (p *PcmSpeaker) WatchJackRouting(ctx context.Context) {
 	t := time.NewTicker(JackReconcileInterval)
 	defer t.Stop()

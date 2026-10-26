@@ -980,13 +980,8 @@ func collectStats() client.DeviceStats {
 		b := inserted
 		st.JackInserted = &b
 	}
-	if v, err := mixer.Get(mixer.SpeakerAmp); err == nil {
-		st.JackAmpSwitch = v
-	}
-	if v, err := mixer.Get(mixer.HPDriverGain); err == nil {
-		st.JackHPGain = v
-	}
 	if globalPcmSpeaker != nil {
+		st.JackMixer = globalPcmSpeaker.JackMixerState()
 		st.JackDriftCount = globalPcmSpeaker.JackDriftCount()
 	}
 	return st

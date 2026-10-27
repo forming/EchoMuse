@@ -859,6 +859,12 @@ func (d *DataClient) connect(ctx context.Context, baseURL string) error {
 		if owned {
 			d.CloseAnyListen(listen.ReasonLink)
 		}
+		// The same holds for playback: a stream's EOS cannot arrive on the
+		// next connection, and one left open holds the wake bar down and
+		// makes a later stop swallow the next stream (2026-10-23).
+		if d.spk != nil {
+			d.spk.AbandonStreams(time.Now())
+		}
 
 		d.connMu.Lock()
 		if d.conn == conn {

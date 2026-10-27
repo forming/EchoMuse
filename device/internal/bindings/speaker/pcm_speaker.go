@@ -907,6 +907,18 @@ func (p *PcmSpeaker) EndStream() { p.voice.endStream() }
 // EndMusicStream marks the in-flight music stream complete (0x05).
 func (p *PcmSpeaker) EndMusicStream() { p.music.endStream() }
 
+// AbandonStreams ends both planes' streams when the data link that carried
+// them closes, since their EOS frames cannot arrive on the next one. A plane
+// already fed after linkLost belongs to the replacement and is kept.
+func (p *PcmSpeaker) AbandonStreams(linkLost time.Time) {
+	if p.voice.abandonIdleSince(linkLost) {
+		log.Println("[speaker] voice stream abandoned: its EOS was lost with the link")
+	}
+	if p.music.abandonIdleSince(linkLost) {
+		log.Println("[speaker] music stream abandoned: its EOS was lost with the link")
+	}
+}
+
 // Flush cuts a playing VOICE stream immediately (barge-in). Two parts:
 //  1. Drain the buffer — kills up to ~5.5s already queued on-device.
 //  2. Arm discarding (if a stream is mid-flight) — subsequent periods of
